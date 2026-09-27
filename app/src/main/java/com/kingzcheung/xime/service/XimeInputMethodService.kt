@@ -482,11 +482,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                         resources.configuration.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
                     applyCompactMode()
                     applyWindowBackground()
-                    if (hasHardwareKeyboard) {
-                        currentInputConnection?.requestCursorUpdates(
-                            InputConnection.CURSOR_UPDATE_MONITOR or InputConnection.CURSOR_UPDATE_IMMEDIATE
-                        )
-                    }
+                    updateCursorUpdateMonitoring()
                 }
             }
         }
@@ -1995,11 +1991,18 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             resources.configuration.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
         applyCompactMode()
         applyWindowBackground()
-        if (hasHardwareKeyboard) {
-            currentInputConnection?.requestCursorUpdates(
+        updateCursorUpdateMonitoring()
+    }
+
+    /** 根据当前硬件键盘状态管理光标位置更新监听。 */
+    private fun updateCursorUpdateMonitoring() {
+        currentInputConnection?.requestCursorUpdates(
+            if (hasHardwareKeyboard) {
                 InputConnection.CURSOR_UPDATE_MONITOR or InputConnection.CURSOR_UPDATE_IMMEDIATE
-            )
-        }
+            } else {
+                0
+            }
+        )
     }
 
     private var anchorCoords = floatArrayOf(0f, 0f, 0f, 0f)
@@ -2055,11 +2058,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         applyCompactMode()
         loadDarkModePreference()
         applyWindowBackground()
-        if (hasHardwareKeyboard) {
-            currentInputConnection?.requestCursorUpdates(
-                InputConnection.CURSOR_UPDATE_MONITOR or InputConnection.CURSOR_UPDATE_IMMEDIATE
-            )
-        }
+        updateCursorUpdateMonitoring()
     }
 
     internal fun applyWindowBackground() {
