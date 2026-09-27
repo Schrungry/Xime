@@ -44,9 +44,16 @@ let pushSkipCount = 0;
 
 // ================= 工具函数 =================
 
+// 去除 \r\n：用户名/密码可能因配置或粘贴带入换行，若不清除会进入 base64 凭据，
+// 导致部分不对换行做特殊处理的 WebDAV 服务器认证失败（典型：凭据末尾多一个 \n）。
+function stripNewlines(value: string): string {
+  return value.replace(/[\r\n]/g, '');
+}
+
 function basicAuthHeader(username: string, password: string): string {
-  const credential = new TextEncoder().encode(username + ':' + password);
-  return 'Basic ' + host.crypto.base64(credential);
+  const credential = new TextEncoder().encode(stripNewlines(username) + ':' + stripNewlines(password));
+  // base64 结果同样清理换行，保证 Authorization 请求头是单行值
+  return 'Basic ' + stripNewlines(host.crypto.base64(credential));
 }
 
 function buildHeaders(): Record<string, string> {
