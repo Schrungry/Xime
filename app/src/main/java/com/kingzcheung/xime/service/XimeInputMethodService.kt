@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -109,6 +110,7 @@ import com.kingzcheung.xime.util.FileLogger
 import com.kingzcheung.xime.util.PreeditMergeHelper
 import com.kingzcheung.xime.BuildConfig
 import com.kingzcheung.xime.keyboard.ActionExecutor
+import com.kingzcheung.xime.keyboard.KeyboardPage
 import com.kingzcheung.xime.keyboard.OverlayRoute
 import com.kingzcheung.xime.keyboard.ToolbarButtonItem
 import com.kingzcheung.xime.plugin.core.api.PluginResultItem
@@ -1552,6 +1554,18 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                                     toolPanelUiNodes = state.toolPanelUiNodes,
                                     clipboardSyncEnabled = state.clipboardSyncEnabled,
                                 )
+                            }
+                            // 覆盖页（菜单/剪贴板/表情等）激活时清除内联建议：
+                            // InlineContentView 由独立 surface 支撑，其子 surface 合成在
+                            // 窗口自身内容之上，Compose 覆盖层即使不透明也遮不住，
+                            // 建议会浮在剪贴板/菜单面板上方（表现为候选栏位置内容重叠）。
+                            // 与开始输入时 dismissInlineSuggestions 同语义，均含 surface
+                            // 释放（InlineSuggestionViews.releaseAll）；覆盖页关闭后由
+                            // 宿主 app 重新下发建议。
+                            val isOverlayActive = keyboardViewModel.page
+                                .collectAsState().value is KeyboardPage.Overlay
+                            LaunchedEffect(isOverlayActive) {
+                                if (isOverlayActive) dismissInlineSuggestions()
                             }
                             val callbacks = rememberImeKeyboardCallbacks(this@XimeInputMethodService, floatingMinY, state, effectiveScreenH)
                             keyboardCallbacks = callbacks
