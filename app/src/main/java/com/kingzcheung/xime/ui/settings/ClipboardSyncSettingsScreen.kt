@@ -141,12 +141,12 @@ fun ClipboardSyncSettingsContent(
                             }
                         }
                     } else {
+                        // 入口始终可见：只装 1 个插件时也能点开确认候选/协议与配置，
+                        // 藏起来会让"当前生效的是谁、能不能换"在页面上无处可查
                         CurrentServiceItem(
                             pluginInfo = installedPlugins.find { it.id == activePlugin?.first },
                             pluginId = activePlugin?.first,
                             plugin = activePlugin?.second,
-                            // 只有一个插件且已在用时切换没有意义；但"当前没有生效服务"时必须能选出来
-                            switchable = clipboardPlugins.size > 1 || activePlugin == null,
                             onClick = { showServicePicker = true }
                         )
                     }
@@ -221,14 +221,14 @@ fun ClipboardSyncSettingsContent(
  * 当前生效的同步服务（一行）。
  *
  * 切换入口收进对话框（[SyncServicePickerDialog] 的等价内联实现）：插件多时页面长度恒定，
- * 这里只回答"现在用的是谁、能不能同步图片"。整行可点（只有一个插件时不可点）。
+ * 这里只回答"现在用的是谁、能不能同步图片"。整行**始终可点**——只装一个插件时，
+ * 这个入口是页面上唯一能确认候选/协议与配置的地方，藏掉它会让"当前生效的是谁"无处可查。
  */
 @Composable
 private fun CurrentServiceItem(
     pluginInfo: PluginInfo?,
     pluginId: String?,
     plugin: ClipboardSyncPlugin?,
-    switchable: Boolean,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -240,7 +240,7 @@ private fun CurrentServiceItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (switchable) Modifier.clickable(onClick = onClick) else Modifier)
+            .clickable(onClick = onClick)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -278,17 +278,15 @@ private fun CurrentServiceItem(
                 color = MaterialTheme.colorScheme.primary
             )
         }
-        if (switchable) {
-            Text(
-                text = if (pluginId == null) "选择" else "切换",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        Text(
+            text = if (pluginId == null) "选择" else "切换",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

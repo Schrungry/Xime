@@ -3,11 +3,13 @@ package com.kingzcheung.xime.ui.settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kingzcheung.xime.plugin.ExtensionManager
 import com.kingzcheung.xime.plugin.core.api.PluginIcon
@@ -301,10 +304,9 @@ fun OnlineAsrTab(
             SettingsSection(
                 title = "当前服务",
                 content = {
+                    // 入口始终可见：只装 1 个服务时也能点开确认候选与配置状态
                     CurrentAsrProviderItem(
                         provider = activeProvider,
-                        // 只有一个服务且已在用时切换没有意义；但"当前没有生效服务"时必须能选出来
-                        switchable = providers.size > 1 || activeProvider == null,
                         onSwitch = { showPicker = true },
                         onSettings = { activeProvider?.let { onSettings(it.id) } }
                     )
@@ -365,19 +367,20 @@ fun OnlineAsrTab(
 
 /**
  * 当前使用的在线识别服务（一行）：插件自己的图标 + 名称/描述 + 能力标签，
- * 右侧齿轮进配置页、整行可点打开服务选择弹窗。
+ * 右侧齿轮进配置页、整行可点打开服务选择弹窗。整行**始终可点**——只装一个服务时，
+ * 这个入口是页面上唯一能确认候选与配置状态的地方。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CurrentAsrProviderItem(
     provider: AsrProvider?,
-    switchable: Boolean,
     onSwitch: () -> Unit,
     onSettings: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (switchable) Modifier.clickable(onClick = onSwitch) else Modifier)
+            .clickable(onClick = onSwitch)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -399,7 +402,12 @@ private fun CurrentAsrProviderItem(
             )
             if (!provider?.features.isNullOrEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 标签用 FlowRow 换行而不是挤在一行：行尾常驻「选择/切换」+ 箭头后，
+                // 单行 Row 会把每个标签压窄、文字折成两行（观感"变形"）
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     provider.features.forEach { feature ->
                         Surface(
                             shape = RoundedCornerShape(4.dp),
@@ -409,6 +417,8 @@ private fun CurrentAsrProviderItem(
                                 text = feature,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.tertiary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -426,17 +436,15 @@ private fun CurrentAsrProviderItem(
                 )
             }
         }
-        if (switchable) {
-            Text(
-                text = if (provider == null) "选择" else "切换",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        Text(
+            text = if (provider == null) "选择" else "切换",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
