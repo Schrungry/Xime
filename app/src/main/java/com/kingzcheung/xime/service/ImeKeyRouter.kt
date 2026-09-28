@@ -1327,8 +1327,13 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
         }
         
         if (service.candidateState.value.isShowingRecentClipboard && index >= 0 && index < service.recentClipboardItemsState.value.size) {
-            val text = service.recentClipboardItemsState.value[index].text
-            service.textCommit.selectClipboardItem(text)
+            // 文本与图片共用同一候选索引空间：图片走"commitContent 直插 → 失败落系统剪贴板"链路
+            val item = service.recentClipboardItemsState.value[index]
+            if (item.isImage) {
+                service.textCommit.selectClipboardImage(item)
+            } else {
+                service.textCommit.selectClipboardItem(item.text)
+            }
             service.candidateState.value = service.candidateState.value.copy(
                 isShowingRecentClipboard = false,
                 candidates = emptyList(),
