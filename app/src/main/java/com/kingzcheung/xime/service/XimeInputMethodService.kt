@@ -82,6 +82,7 @@ import com.kingzcheung.xime.viewmodel.KeyboardViewModel
 import com.kingzcheung.xime.association.AssociationService
 import com.kingzcheung.xime.clipboard.ClipboardManager
 import com.kingzcheung.xime.clipboard.sync.ClipboardSyncBridge
+import com.kingzcheung.xime.plugin.ActivePluginSelection
 import com.kingzcheung.xime.plugin.ExtensionManager
 import com.kingzcheung.xime.plugin.core.api.ToolPlugin
 import com.kingzcheung.xime.plugin.core.api.ToolResult
@@ -806,12 +807,19 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             val enabled = ExtensionManager.getEnabledClipboardSyncPlugins(this)
             if (enabled.isEmpty()) return
             val preferredId = SettingsPreferences.getClipboardSyncPluginId(this)
-            val selected = enabled.firstOrNull { it.first == preferredId } ?: enabled.first()
+            // 与插件管理页共用同一判定规则（ActivePluginSelection），避免"引擎在跑、页面显示未使用"
+            val resolvedId = ActivePluginSelection.resolve(preferredId, enabled.map { it.first })
+            val selected = enabled.firstOrNull { it.first == resolvedId } ?: enabled.first()
+            // 偏好为空或指向未启用插件时回填实际选中项：让状态收敛，而不是长期并存两种"真相"
+            if (resolvedId != preferredId) {
+                SettingsPreferences.setClipboardSyncPluginId(this, selected.first)
+                Log.d(TAG, "Clipboard sync plugin id resolved: '$preferredId' -> '${selected.first}'")
+            }
             // 能力声明校验：未声明同步协议的插件不启动（manifest.capabilities.clipboard_sync.protocols）
-            val protocols = ExtensionManager.getAllInstalledPlugins()
+            val clipboardSyncCapabilities = ExtensionManager.getAllInstalledPlugins()
                 .firstOrNull { it.id == selected.first }
-                ?.capabilities?.clipboardSync?.protocols
-            if (protocols.isNullOrEmpty()) {
+                ?.capabilities?.clipboardSync
+            if (clipboardSyncCapabilities?.protocols.isNullOrEmpty()) {
                 FileLogger.w(TAG, "Clipboard sync plugin ${selected.first} 未声明同步协议，拒绝启动")
                 return
             }
@@ -824,6 +832,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 clipboardManager,
                 plugin,
                 pluginId = selected.first,
+                // 未声明 attachments 的插件自动降级为仅文本同步（图片不推送、远端图片不落盘）
+                supportsAttachments = clipboardSyncCapabilities.attachments,
                 pullIntervalSeconds = {
                     syncConfigStore.get(ClipboardSyncBridge.CONFIG_KEY_PULL_INTERVAL_SECONDS)
                 }
@@ -859,10 +869,18 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         // 当前 bridge 使用的插件与偏好选中的插件不一致时，重启切换到偏好插件
         val enabled = ExtensionManager.getEnabledClipboardSyncPlugins(this)
         val preferredId = SettingsPreferences.getClipboardSyncPluginId(this)
-        val shouldUse = (if (preferredId.isNotEmpty()) {
-            enabled.firstOrNull { it.first == preferredId }
-        } else null) ?: enabled.first()
-        if (shouldUse.first != clipboardSyncBridge?.pluginId) {
+        // 与 startClipboardSyncIfEnabled 同一解析规则（含"首个已启用项"回退）
+        val resolvedId = ActivePluginSelection.resolve(preferredId, enabled.map { it.first })
+        val shouldUse = enabled.firstOrNull { it.first == resolvedId } ?: return
+        if (resolvedId != preferredId) SettingsPreferences.setClipboardSyncPluginId(this, resolvedId)
+        // 能力声明也会随插件热更新变化（典型：插件从"仅文本"升级到声明 attachments）：
+        // 能力变了必须重建 bridge，否则会一直沿用旧能力（表现成"图片永远不同步"）
+        val attachments = ExtensionManager.getAllInstalledPlugins()
+            .firstOrNull { it.id == shouldUse.first }
+            ?.capabilities?.clipboardSync?.attachments == true
+        if (shouldUse.first != clipboardSyncBridge?.pluginId ||
+            attachments != clipboardSyncBridge?.supportsAttachments
+        ) {
             stopClipboardSync()
             startClipboardSyncIfEnabled()
         }
@@ -1442,7 +1460,17 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                             HardwareKeyboardCandidateBar(
                                 inputText = cand.inputText,
                                 preeditText = cand.preeditText,
-                                candidates = cand.candidates,
+                                // 紧凑/浮空候选栏只渲染文本：图片位替换为「图片」标签，
+                                // 长度与顺序不变（点选索引仍与 recentClipboardItemsState 对齐）
+                                candidates = cand.candidates.mapIndexed { i, text ->
+                                    if (cand.isShowingRecentClipboard &&
+                                        recentClipboardItemsState.value.getOrNull(i)?.isImage == true
+                                    ) {
+                                        "图片"
+                                    } else {
+                                        text
+                                    }
+                                },
                                 hasNextPage = cand.hasNextPage,
                                 hasPrevPage = cand.hasPrevPage,
                                 cursorX = state.cursorX,

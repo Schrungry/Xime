@@ -44,7 +44,7 @@ fun SettingsScreen(
                 onNavigateToSmartPrediction = { navController.navigate(SettingsRoutes.SmartPrediction) },
                 onNavigateToSpeechToText = { navController.navigate(SettingsRoutes.SpeechToText) },
                 onNavigateToAbout = { navController.navigate(SettingsRoutes.About) },
-                onNavigateToClipboardSync = { navController.navigate(SettingsRoutes.ClipboardSync) },
+                onNavigateToClipboard = { navController.navigate(SettingsRoutes.Clipboard) },
                 onNavigateToBackup = { navController.navigate(SettingsRoutes.Backup) }
             )
         }
@@ -206,10 +206,16 @@ fun SettingsScreen(
                 onBack = { navController.popBackStack() }
             )
         }
+        composable(SettingsRoutes.Clipboard) {
+            ClipboardSettingsContent(
+                onBack = { navController.popBackStack() },
+                // 剪贴板同步作为剪贴板的内页（返回回到剪贴板设置）
+                onNavigateToClipboardSync = { navController.navigate(SettingsRoutes.ClipboardSync) }
+            )
+        }
         composable(SettingsRoutes.ClipboardSync) {
             ClipboardSyncSettingsContent(
                 onBack = { navController.popBackStack() },
-                onNavigateToPlugins = { navController.navigate(SettingsRoutes.Plugins) },
                 onNavigateToMarket = { navController.navigate(SettingsRoutes.MarketPlugins) }
             )
         }

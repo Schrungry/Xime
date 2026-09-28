@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kingzcheung.xime.plugin.ActivePluginSelection
 import com.kingzcheung.xime.plugin.ExtensionManager
 import com.kingzcheung.xime.plugin.core.model.PluginCategory
 import com.kingzcheung.xime.settings.BackupManager
@@ -75,11 +76,13 @@ fun BackupSettingsContent(
     val installedPlugins = remember { ExtensionManager.getAllInstalledPlugins() }
     val backupPlugins = remember { installedPlugins.filter { it.category == PluginCategory.BACKUP } }
     val syncPlugins = remember { ExtensionManager.getEnabledBackupPlugins(context) }
+    // 与插件管理页/引擎同一判定规则（ActivePluginSelection）：偏好为空或指向未启用插件时回退首个已启用项
     var selectedPluginId by remember {
         mutableStateOf(
-            SettingsPreferences.getBackupPluginId(context).ifEmpty {
-                syncPlugins.firstOrNull()?.first ?: ""
-            }
+            ActivePluginSelection.resolve(
+                SettingsPreferences.getBackupPluginId(context),
+                syncPlugins.map { it.first }
+            )
         )
     }
     var activePlugin by remember {
