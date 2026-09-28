@@ -807,10 +807,17 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 return
             }
             val plugin = selected.second
+            // 拉取间隔由所选插件的配置提供（插件 settings.schema 声明 pull_interval_seconds），
+            // 每次拉取节流时动态读取，插件设置修改后即时生效
+            val syncConfigStore = PluginManager.configStoreFactory
+                .create(applicationContext as android.app.Application, selected.first)
             clipboardSyncBridge = ClipboardSyncBridge(
                 clipboardManager,
                 plugin,
-                pluginId = selected.first
+                pluginId = selected.first,
+                pullIntervalSeconds = {
+                    syncConfigStore.get(ClipboardSyncBridge.CONFIG_KEY_PULL_INTERVAL_SECONDS)
+                }
             )
             clipboardSyncBridge?.start()
             uiState.value = uiState.value.copy(clipboardSyncEnabled = true)

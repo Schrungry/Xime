@@ -31,18 +31,39 @@ import kotlinx.coroutines.launch
 class ClipboardSyncBridge(
     private val clipboardManager: ClipboardManager,
     private val plugin: ClipboardSyncPlugin,
-    val pluginId: String = ""
+    val pluginId: String = "",
+    /**
+     * 拉取最小间隔（秒）的配置读取器，由宿主接入所选插件的 configStore
+     * （key 为 [Companion.CONFIG_KEY_PULL_INTERVAL_SECONDS]，插件 settings.schema
+     * 声明同名 NUMBER 字段）。每次 [pullOnce] 时读取，插件设置改后即时生效；
+     * 未配置/非法值回退 [Companion.DEFAULT_PULL_MIN_INTERVAL_MS]。
+     */
+    private val pullIntervalSeconds: () -> String? = { null }
 ) {
     companion object {
         private const val TAG = "ClipboardSync"
         private const val PUSH_RETRY_BACKOFF_MS = 5_000L
 
+        /** 拉取间隔配置在插件 configStore 中的 key（插件 settings.schema 需声明同名 NUMBER 字段）。 */
+        const val CONFIG_KEY_PULL_INTERVAL_SECONDS = "pull_interval_seconds"
+
+        /** 配置允许的范围（秒）：下限为纯防抖，上限防误填导致拉取停摆。 */
+        const val PULL_INTERVAL_SECONDS_MIN = 1L
+        const val PULL_INTERVAL_SECONDS_MAX = 600L
+
         /**
-         * 拉取最小间隔：键盘每次显示都会触发 [pullOnce]，高频切换时请求数会轻易
+         * 拉取最小间隔默认值：键盘每次显示都会触发 [pullOnce]，高频切换时请求数会轻易
          * 超出 WebDAV 服务的限流阈值（坚果云免费版每 30 分钟仅允许 600 次请求，
-         * 超限返回 503 且需等待解封），必须节流。
+         * 超限返回 503 且需等待解封），默认保守节流；用户可经插件配置下调。
          */
-        private const val PULL_MIN_INTERVAL_MS = 30_000L
+        const val DEFAULT_PULL_MIN_INTERVAL_MS = 30_000L
+
+        /** 解析插件配置的拉取间隔（秒）→ 毫秒；空/非法回退默认，越界 clamp。 */
+        fun resolvePullIntervalMs(rawSeconds: String?): Long {
+            val seconds = rawSeconds?.trim()?.toLongOrNull()
+                ?: return DEFAULT_PULL_MIN_INTERVAL_MS
+            return seconds.coerceIn(PULL_INTERVAL_SECONDS_MIN, PULL_INTERVAL_SECONDS_MAX) * 1000L
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -110,8 +131,9 @@ class ClipboardSyncBridge(
     fun pullOnce() {
         if (!running) return
         val now = System.currentTimeMillis()
-        if (now - lastPullAt < PULL_MIN_INTERVAL_MS) {
-            Log.d(TAG, "Pull throttled (min interval ${PULL_MIN_INTERVAL_MS / 1000}s)")
+        val minIntervalMs = resolvePullIntervalMs(pullIntervalSeconds())
+        if (now - lastPullAt < minIntervalMs) {
+            Log.d(TAG, "Pull throttled (min interval ${minIntervalMs / 1000}s)")
             return
         }
         lastPullAt = now
