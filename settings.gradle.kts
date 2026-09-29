@@ -5,7 +5,6 @@ pluginManagement {
         maven { setUrl("https://maven.aliyun.com/repository/google") }
         maven { setUrl("https://maven.aliyun.com/repository/gradle-plugin") }
         maven { setUrl("https://maven.aliyun.com/repository/public") }
-        maven { setUrl("https://jitpack.io") }
         gradlePluginPortal()
         mavenCentral()
         google {
@@ -15,8 +14,6 @@ pluginManagement {
                 includeGroupByRegex("androidx.*")
             }
         }
-        mavenCentral()
-        gradlePluginPortal()
     }
 }
 dependencyResolutionManagement {
