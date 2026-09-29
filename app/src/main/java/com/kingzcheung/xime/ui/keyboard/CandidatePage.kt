@@ -101,6 +101,10 @@ data class CandidatePageState(
     val railSelectedPinyinIndex: Int = -1,
     /** 拼音选中胶囊强调色（对齐九键 CandidateItem）；Unspecified 时用 textColor 兜底 */
     val railAccentColor: Color = Color.Unspecified,
+    /** 右栏等分压缩（悬浮模式页高有限）：true 时 4 键均分列高（同横屏），
+     *  false 保持竖屏固定 46dp 方块——固定尺寸在悬浮矮卡片下放不下会整体溢出，
+     *  最底部的回车键被卡片圆角裁掉一半 */
+    val rightRailEqualSplit: Boolean = false,
 )
 
 /**
@@ -358,14 +362,15 @@ fun CandidatePage(
             Spacer(modifier = Modifier.width(8.dp))
 
             // ── 右栏：退格 / 上一页 / 下一页 / 回车 ──
-            // 竖屏固定方块、垂直居中分布；横屏栏高有限改为等分压缩
-            val railKeyModifier = if (isLandscape) Modifier.weight(1f) else Modifier.size(46.dp)
+            // 竖屏固定方块、垂直居中分布；横屏/悬浮（页高有限）改为等分压缩
+            val compactRail = isLandscape || state.rightRailEqualSplit
+            val railKeyModifier = if (compactRail) Modifier.weight(1f) else Modifier.size(46.dp)
             Column(
                 modifier = Modifier
                     .fillMaxHeight()
                     .width(rightRailWidth)
                     .padding(vertical = 6.dp),
-                verticalArrangement = if (isLandscape) Arrangement.spacedBy(4.dp)
+                verticalArrangement = if (compactRail) Arrangement.spacedBy(4.dp)
                 else Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
             ) {
                 RailKey(

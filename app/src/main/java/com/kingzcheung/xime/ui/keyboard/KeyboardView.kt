@@ -619,13 +619,17 @@ fun KeyboardView(
                 // 点击切换音节后服务层重拉全量候选刷新本页），空闲态回落 side_symbols；
                 // 左栏宽度与九键键盘左栏视觉同宽：九键竖屏根容器有左右各 4dp 边距
                 // （padding start/end 4dp），Row 内 spacedBy(2dp)×2，weight 基数 =
-                // 屏宽-8-4；左栏列 = 基数×0.8/5，面板再带 LocalKeyVisualPadding
+                // 页宽-8-4；左栏列 = 基数×0.8/5，面板再带 LocalKeyVisualPadding
                 // 水平缩进（keySpacingX ?: 2dp）——展开页左栏为全宽背景，同额扣除
-                // （横屏九键无左栏不缩放）
+                // （横屏九键无左栏不缩放）。
+                // 页宽基准：悬浮模式展开页渲染在卡片内（0.85×短边宽），必须按卡片宽
+                // 计算——此前用全屏 screenWidthDp，横屏悬浮下左栏 ≈0.16×长边，占掉
+                // 窄卡片四成宽度，中间候选区被压成细条（候选字裁成"细线"）
+                val expandedPageWidthDp = if (state.isFloatingMode) cardWidthDp else screenW
                 val isT9Layout = keyboardState is KeyboardLayoutState.T9Pinyin
                 val t9RailWidthDp = if (isT9Layout && !isLandscape) {
                     val railInset = kbKey.spacingFor("t9").first ?: 2f
-                    ((LocalConfiguration.current.screenWidthDp - 12) * 0.8f / 5f -
+                    ((expandedPageWidthDp - 12) * 0.8f / 5f -
                         railInset * 2f + 0.5f).toInt().coerceAtLeast(32)
                 } else 0
                 // 左栏垂直缩进与九键左栏面板同源（keySpacingY ?: 2dp），展开/收起
@@ -638,10 +642,12 @@ fun KeyboardView(
                     if (isT9Layout && t9Controller.leftPanelState ==
                         T9InputController.LeftPanelState.SELECTION
                     ) t9Controller.firstOptions.indexOf(t9Controller.selectedOption) else -1
-                // 展开页展示全量候选；行分组按字符当量估算，仅作展示分组
+                // 展开页展示全量候选；行分组按字符当量估算，仅作展示分组。
+                // 宽度基准同左栏：悬浮按卡片宽，否则按全屏宽（估算偏差只影响每行
+                // 词数，行内条目宽度自适应拉伸，不会溢出）
                 val rowWidthUnits = with(LocalDensity.current) {
                     ExpandedCandidatePager.rowWidthUnits(
-                        screenWidthPx = LocalConfiguration.current.screenWidthDp.dp.toPx(),
+                        screenWidthPx = expandedPageWidthDp.dp.toPx(),
                         density = density,
                         scaledDensity = density * fontScale
                     )
@@ -674,6 +680,7 @@ fun KeyboardView(
                         railPinyinOptions = railPinyinOptions,
                         railSelectedPinyinIndex = railSelectedPinyinIndex,
                         railAccentColor = accentColor,
+                        rightRailEqualSplit = state.isFloatingMode,
                     ),
                     callbacks = CandidatePageCallbacks(
                         onCandidateSelect = { entry ->
