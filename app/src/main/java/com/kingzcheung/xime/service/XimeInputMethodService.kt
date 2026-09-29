@@ -375,6 +375,18 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         voiceRecognitionHandler.finishRecognition()
     }
 
+    /**
+     * 发送类动作前的语音会话收尾：立即冲刷已识别文本并丢弃迟到结果
+     * （见 [VoiceRecognitionHandler.sealPendingForSend]），随后结束会话。
+     *
+     * 与 [endVoiceSession] 的区别是"不等引擎最终结果"——宿主动作（聊天应用的回车即"发送"）
+     * 马上就要执行，等来的最终结果只会落在动作之后，造成输入框内容重复或错位。
+     */
+    internal fun sealVoiceSessionForSend() {
+        voiceRecognitionHandler.sealPendingForSend()
+        endVoiceSession()
+    }
+
     /** 语音会话真正完成（最终结果已提交/超时兜底/出错）后恢复键盘状态。幂等。 */
     internal fun restoreAfterVoiceFinish() {
         // 兜底：会话结束的任何路径都确保录音已请求停止（幂等，正常松手路径
@@ -1301,6 +1313,10 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             onVoiceDismiss = {
                 val action = pendingVoiceAction
                 pendingVoiceAction = null
+                // 滑到左/右按钮抬手＝撤销/发送：动作执行前先封口。
+                // 动作=发送时收尾等待中的最终结果会落在发送之后（内容重复/错位）；
+                // 动作=撤销时也需先冲刷，撤销按"已上屏文本"计数才准。
+                if (action != null) voiceRecognitionHandler.sealPendingForSend()
                 action?.invoke()
                 endVoiceSession()
             },
