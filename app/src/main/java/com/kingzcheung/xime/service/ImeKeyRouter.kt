@@ -193,7 +193,13 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
         // 常驻语音模式下开始打字：先结束语音会话（提交已识别文本），再处理按键
         val current = service.uiState.value
         if (current.isVoiceMode && current.voiceSticky) {
-            service.endVoiceSession()
+            // 回车/换行会立即触发宿主动作（聊天应用里回车即"发送"）：必须先封口，
+            // 否则收尾等待中的最终结果在发送之后才落进输入框，内容重复/错位。
+            if (key == "enter" || key == "newline") {
+                service.sealVoiceSessionForSend()
+            } else {
+                service.endVoiceSession()
+            }
         }
         // 长按退格以固定频率重复派发，走合并路径，避免 keyJobs 堆积导致候选栏抖动
         if (key == "delete") {

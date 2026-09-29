@@ -455,6 +455,10 @@ fun KeyboardView(
                     isDarkTheme = state.isDarkTheme
                 ),
                 callbacks = CandidateBarCallbacks(
+                    // 常驻语音：点按候选栏频谱区域结束识别。
+                    // 复用 onVoiceModeChange(false) 而非 onVoiceStickyToggle——
+                    // 前者就是"轻触空格结束"走的同一条路径（含震动反馈）。
+                    onVoiceStop = { callbacks.onVoiceModeChange?.invoke(false) },
                     onCandidateSelect = { index ->
                         if (showHandwritingCandidates && index in handwritingCandidates.indices) {
                             // 手写候选点选绕过了服务层 selectCandidate（其入口统一有按键反馈），

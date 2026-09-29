@@ -163,7 +163,13 @@ internal fun rememberImeKeyboardCallbacks(
             },
             onVoiceModeChange = { enabled ->
                 if (!enabled) {
-                    // 长按抬手：结束语音会话（提交当前已识别文本并停止识别）
+                    // 长按抬手/常驻语音轻触空格或点按候选栏频谱：结束语音会话
+                    // （提交当前已识别文本并停止识别）。
+                    // 常驻语音下补一次震动反馈——轻触空格没有任何按键事件，
+                    // 不补就完全没有触感（与进入语音时的 performVibration 对称）。
+                    if (service.uiState.value.voiceSticky) {
+                        service.feedbackManager.performVibration()
+                    }
                     service.endVoiceSession()
                 } else if (!service.uiState.value.isVoiceMode) {
                     service.uiState.value = service.uiState.value.copy(

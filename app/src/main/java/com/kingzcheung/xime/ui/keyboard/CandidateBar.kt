@@ -109,7 +109,9 @@ data class CandidateBarCallbacks(
     val onAssociationSelect: ((Int) -> Unit)? = null,
     // 长按候选：抛事件给宿主（键盘视图内弹确认覆盖层，不弹独立窗口——
     // 焦点型弹窗会抢焦点导致 IME 被系统收起）。
-    val onCandidateLongPress: ((Int) -> Unit)? = null
+    val onCandidateLongPress: ((Int) -> Unit)? = null,
+    /** 常驻语音：点按候选栏的频谱区域结束识别（与轻触空格同一条结束路径）。 */
+    val onVoiceStop: (() -> Unit)? = null
 )
 
 @Composable
@@ -300,11 +302,15 @@ fun CandidateBar(
         verticalArrangement = Arrangement.Center
     ) {
         if (isVoiceSticky) {
-            // 常驻语音模式：候选栏显示语音引擎名 + 频谱
+            // 常驻语音模式：候选栏显示语音引擎名 + 频谱。
+            // 整条候选栏可点：轻触频谱即结束识别，不必非去点空格。
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(),
+                    .fillMaxHeight()
+                    .clickable(enabled = callbacks.onVoiceStop != null) {
+                        callbacks.onVoiceStop?.invoke()
+                    },
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
