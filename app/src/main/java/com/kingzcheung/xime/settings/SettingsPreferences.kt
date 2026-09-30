@@ -631,6 +631,28 @@ object SettingsPreferences {
         getPrefs(context).edit().putInt(KEY_KEYBOARD_BOTTOM_PADDING_DP, paddingDp).apply()
     }
 
+    /** 键盘左边距（dp）：>0 时键盘左缘内收（宽度调节；左右独立，可整体偏移）。 */
+    private const val KEY_KEYBOARD_MARGIN_START_DP = "keyboard_margin_start_dp"
+
+    /** 键盘右边距（dp）。 */
+    private const val KEY_KEYBOARD_MARGIN_END_DP = "keyboard_margin_end_dp"
+
+    fun getKeyboardMarginStartDp(context: Context): Int {
+        return getPrefs(context).getInt(KEY_KEYBOARD_MARGIN_START_DP, 0)
+    }
+
+    fun setKeyboardMarginStartDp(context: Context, marginDp: Int) {
+        getPrefs(context).edit().putInt(KEY_KEYBOARD_MARGIN_START_DP, marginDp).apply()
+    }
+
+    fun getKeyboardMarginEndDp(context: Context): Int {
+        return getPrefs(context).getInt(KEY_KEYBOARD_MARGIN_END_DP, 0)
+    }
+
+    fun setKeyboardMarginEndDp(context: Context, marginDp: Int) {
+        getPrefs(context).edit().putInt(KEY_KEYBOARD_MARGIN_END_DP, marginDp).apply()
+    }
+
     fun isSchemaImportWarningDismissed(context: Context): Boolean {
         return getPrefs(context).getBoolean(KEY_SCHEMA_IMPORT_WARNING_DISMISSED, false)
     }

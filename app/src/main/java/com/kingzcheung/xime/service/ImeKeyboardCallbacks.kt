@@ -133,10 +133,11 @@ internal fun rememberImeKeyboardCallbacks(
             onKeyboardResize = {
                 val config = service.resources.configuration
                 val isLandscape = config.screenWidthDp > config.screenHeightDp
-                val currentHeight = SettingsPreferences.getKeyboardHeightDp(service, isLandscape)
                 service.uiState.value = service.uiState.value.copy(
                     showKeyboardResize = true,
-                    resizePreviewHeightDp = currentHeight,
+                    resizePreviewHeightDp = SettingsPreferences.getKeyboardHeightDp(service, isLandscape),
+                    resizePreviewMarginStartDp = SettingsPreferences.getKeyboardMarginStartDp(service),
+                    resizePreviewMarginEndDp = SettingsPreferences.getKeyboardMarginEndDp(service),
                 )
             },
             onReloadConfig = { service.schemaController.reloadConfig() },

@@ -62,6 +62,7 @@ fun SettingsScreen(
                 },
                 onNavigateToMarket = { navController.navigate(SettingsRoutes.Market) },
                 onNavigateToRimeFileBrowser = { navController.navigate(SettingsRoutes.RimeFileBrowser) },
+                onNavigateToSchemaDictBrowser = { navController.navigate(SettingsRoutes.SchemaDictBrowser) },
             )
         }
         composable(SettingsRoutes.Market) {
@@ -192,9 +193,17 @@ fun SettingsScreen(
             )
         }
         composable(SettingsRoutes.Dictionary) {
-            DictionarySettingsContent(
+            DictionaryHubContent(
+                onNavigateToUserDict = { navController.navigate(SettingsRoutes.DictionaryUserDict) },
+                onNavigateToCustomPhrase = { navController.navigate(SettingsRoutes.DictionaryCustomPhrase) },
                 onBack = { navController.popBackStack() }
             )
+        }
+        composable(SettingsRoutes.DictionaryUserDict) {
+            UserDictContent(onBack = { navController.popBackStack() })
+        }
+        composable(SettingsRoutes.DictionaryCustomPhrase) {
+            CustomPhraseSettingsContent(onBack = { navController.popBackStack() })
         }
         composable(SettingsRoutes.SchemaDictBrowser) {
             SchemaDictBrowserContent(

@@ -333,7 +333,8 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
         val isLandscape = service.resources.configuration.screenWidthDp > service.resources.configuration.screenHeightDp
         SettingsPreferences.setKeyboardHeightDp(service, heightDp, isLandscape)
         service.uiState.value = service.uiState.value.copy(keyboardHeightDp = heightDp)
-        Toast.makeText(service, "键盘高度已调整", Toast.LENGTH_SHORT).show()
+        // 不弹 Toast：调节界面本身就是实时预览，确定时键盘已经变成目标高度，
+        // 再提示"键盘高度已调整"是多余噪音
     }
 
     internal fun toggleFloatingMode(enabled: Boolean, navBarDp: Int = 0) {
