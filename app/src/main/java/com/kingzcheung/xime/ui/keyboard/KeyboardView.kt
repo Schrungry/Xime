@@ -49,6 +49,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -239,6 +240,10 @@ fun KeyboardView(
     val cardWidthDp = (portraitScreenWidth * 0.85f).roundToInt()
     val floatScaleFactor = if (state.isFloatingMode) cardWidthDp.toFloat() / screenW.toFloat() else 0.85f
     val floatFontScale = if (state.isFloatingMode) cardWidthDp.toFloat() / portraitScreenWidth.toFloat() else 1f
+    // 键盘调节支持左右收窄后，实际渲染宽 ≠ 屏宽（屏幕宽度只作首帧兜底）：
+    // 展开候选页的行宽/九键左栏宽度按实测宽计算，收窄后不高估每行容量
+    val densityForMeasure = LocalDensity.current
+    var measuredWidthDp by remember { mutableIntStateOf(0) }
 
     val contentModifier = if (state.isFloatingMode) {
         modifier.keyboardBackground(themeScheme.keyboardBackground, state.isDarkTheme, keyboardBgColor)
@@ -259,7 +264,11 @@ fun KeyboardView(
         onDragEnd = { callbacks.onFloatingKeyboardDragEnd?.invoke() },
         onCardPositioned = onCardPositioned,
     ) {
-    Box(modifier = contentModifier) {
+    Box(
+        modifier = contentModifier.onSizeChanged { size ->
+            measuredWidthDp = with(densityForMeasure) { size.width.toDp().value.roundToInt() }
+        }
+    ) {
         Box {
         // 长按候选删除自造词：确认覆盖层状态（键盘视图内渲染，不弹独立
         // 窗口——焦点型弹窗会抢焦点导致 IME 被系统收起）
@@ -625,7 +634,11 @@ fun KeyboardView(
                 // 页宽基准：悬浮模式展开页渲染在卡片内（0.85×短边宽），必须按卡片宽
                 // 计算——此前用全屏 screenWidthDp，横屏悬浮下左栏 ≈0.16×长边，占掉
                 // 窄卡片四成宽度，中间候选区被压成细条（候选字裁成"细线"）
-                val expandedPageWidthDp = if (state.isFloatingMode) cardWidthDp else screenW
+                val expandedPageWidthDp = when {
+                    state.isFloatingMode -> cardWidthDp
+                    measuredWidthDp > 0 -> measuredWidthDp
+                    else -> screenW
+                }
                 val isT9Layout = keyboardState is KeyboardLayoutState.T9Pinyin
                 val t9RailWidthDp = if (isT9Layout && !isLandscape) {
                     val railInset = kbKey.spacingFor("t9").first ?: 2f

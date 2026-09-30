@@ -456,6 +456,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             isSttEnabled = SettingsPreferences.isSttEnabled(this@XimeInputMethodService),
             keyboardHeightDp = SettingsPreferences.getKeyboardHeightDp(this, isLandscape),
             keyboardBottomPaddingDp = SettingsPreferences.getKeyboardBottomPaddingDp(this),
+            keyboardMarginStartDp = SettingsPreferences.getKeyboardMarginStartDp(this),
+            keyboardMarginEndDp = SettingsPreferences.getKeyboardMarginEndDp(this),
             toolbarButtons = SettingsPreferences.getToolbarButtons(this),
             isFloatingMode = isFloatingMode,
             floatingOffsetX = clampedX,
@@ -1352,6 +1354,9 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             isFocusable = true
             isFocusableInTouchMode = true
             composeViewRef = this
+            // 键盘调节的半透明遮罩要画到 composeView 顶边之外（键盘上方的应用区域）：
+            // ComposeView 默认 clipChildren=true 会把越界内容裁掉，这里必须关闭
+            clipChildren = false
             setContent {
                 val cand = candidateState.value
                 val state = uiState.value
@@ -1504,11 +1509,16 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                         // 非浮动：背景与键盘内容同区域，贴底覆盖键盘内容高度 + 底部导航栏留白，
                         // 键盘内容通过 offset 上移 activeBottomDp 留出导航栏空间（对齐参考实现 bottomPaddingSpace）。
                         // 浮动模式：卡片由 KeyboardView 内部 FloatingKeyboardContainer 自绘背景与定位，此处不做背景/偏移。
+                        // 键盘宽度调节：左右边距各自独立内收（可整体偏移），背景随内容同宽
+                        // （调节进行中用预览值，拖动实时跟随；非调节用已保存值）
+                        val keyboardMarginStartDp = if (state.showKeyboardResize) state.resizePreviewMarginStartDp else state.keyboardMarginStartDp
+                        val keyboardMarginEndDp = if (state.showKeyboardResize) state.resizePreviewMarginEndDp else state.keyboardMarginEndDp
                         if (!state.isFloatingMode) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(if (state.showKeyboardResize) (state.resizePreviewHeightDp + state.keyboardBottomPaddingDp + activeBottomDp).dp else (floatingCardContentHeight + state.keyboardBottomPaddingDp + overlayPanelExtra + activeBottomDp).dp)
+                                    .padding(start = keyboardMarginStartDp.dp, end = keyboardMarginEndDp.dp)
                                     .align(androidx.compose.ui.Alignment.BottomCenter)
                                     .keyboardBackground(rootTheme.keyboardBackground, isDark, keyboardBgColor)
                             )
@@ -1521,10 +1531,17 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                                 .align(androidx.compose.ui.Alignment.BottomCenter)
                                 .then(if (state.isFloatingMode) Modifier else Modifier.offset(y = (-activeBottomDp).dp))
                                 .then(
-                                    // 手机：键盘内容整体避入左右边衬区（背景仍全宽 edge-to-edge，与底部处理一致）
-                                    if (!state.isFloatingMode && !isTabletDevice) {
-                                        Modifier.padding(start = horizontalInsetDp.first, end = horizontalInsetDp.second)
-                                    } else Modifier
+                                    // 手机：键盘内容整体避入左右边衬区（挖孔/横屏导航栏）；平板不避让。
+                                    // 宽度调节的左右边距两种设备都生效（边距为 0 时与原行为一致）
+                                    if (state.isFloatingMode) Modifier
+                                    else if (isTabletDevice) Modifier.padding(
+                                        start = keyboardMarginStartDp.dp,
+                                        end = keyboardMarginEndDp.dp,
+                                    )
+                                    else Modifier.padding(
+                                        start = horizontalInsetDp.first + keyboardMarginStartDp.dp,
+                                        end = horizontalInsetDp.second + keyboardMarginEndDp.dp,
+                                    )
                                 )
                         ) {
                         CompositionLocalProvider(LocalStretchFactor provides state.stretchFactor) {
@@ -1634,47 +1651,65 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                             )
                            }
                            if (state.showKeyboardResize) {
+                              // 键盘调节层：渲染在键盘内容 Box 内部，matchParentSize 与键盘
+                              // 同一矩形——遮罩、四边手柄、三按钮与键盘像素级对齐，不存在
+                              // 坐标复制误差。拖动中实时预览，「确定」才落盘；「取消」全部
+                              // 还原；「重置」回默认（预览态，仍需确定）。边界收敛在
+                              // KeyboardResizeBounds，覆盖层只上报合法绝对值。
                               KeyboardResizeOverlay(
-                                     initialHeightDp = state.resizePreviewHeightDp,
-                                     defaultHeightDp = SettingsPreferences.getDefaultKeyboardHeightDp(this@XimeInputMethodService, isLandscape),
-                                     currentBottomPaddingDp = state.keyboardBottomPaddingDp,
-                                     onHeightChange = { newHeight ->
-                                       uiState.value = uiState.value.copy(
-                                           resizePreviewHeightDp = newHeight
-                                       )
-                                   },
+                                  heightDp = state.resizePreviewHeightDp,
+                                  bottomPaddingDp = state.keyboardBottomPaddingDp,
+                                  marginStartDp = state.resizePreviewMarginStartDp,
+                                  marginEndDp = state.resizePreviewMarginEndDp,
+                                  onHeightChange = { newHeight ->
+                                      uiState.value = uiState.value.copy(resizePreviewHeightDp = newHeight)
+                                  },
                                   onBottomPaddingChange = { newPadding ->
-                                       uiState.value = uiState.value.copy(
-                                           keyboardBottomPaddingDp = newPadding
-                                       )
-                                   },
-                                  onReset = { defaultHeight ->
-                                       uiState.value = uiState.value.copy(
-                                           resizePreviewHeightDp = defaultHeight,
-                                           keyboardBottomPaddingDp = 0,
-                                           stretchFactor = 1f
-                                       )
-                                   },
-                                  onConfirm = { newHeight, newPadding ->
-                                       schemaController.setKeyboardHeight(newHeight)
-                                       SettingsPreferences.setKeyboardBottomPaddingDp(this@XimeInputMethodService, newPadding)
-                                       uiState.value = uiState.value.copy(
-                                           showKeyboardResize = false,
-                                           keyboardHeightDp = newHeight,
-                                           keyboardBottomPaddingDp = newPadding,
-                                       )
-                                    },
-                                    onCancel = {
-                                        val restoreHeight = SettingsPreferences.getKeyboardHeightDp(this@XimeInputMethodService, isLandscape)
-                                        val restorePadding = SettingsPreferences.getKeyboardBottomPaddingDp(this@XimeInputMethodService)
-                                        uiState.value = uiState.value.copy(
-                                            showKeyboardResize = false,
-                                            keyboardHeightDp = restoreHeight,
-                                            keyboardBottomPaddingDp = restorePadding,
-                                        )
-                                    },
-                                    modifier = Modifier
-                                       .fillMaxSize()
+                                      uiState.value = uiState.value.copy(keyboardBottomPaddingDp = newPadding)
+                                  },
+                                  onMarginStartChange = { newMargin ->
+                                      uiState.value = uiState.value.copy(resizePreviewMarginStartDp = newMargin)
+                                  },
+                                  onMarginEndChange = { newMargin ->
+                                      uiState.value = uiState.value.copy(resizePreviewMarginEndDp = newMargin)
+                                  },
+                                  onReset = {
+                                      uiState.value = uiState.value.copy(
+                                          resizePreviewHeightDp = SettingsPreferences.getDefaultKeyboardHeightDp(this@XimeInputMethodService, isLandscape),
+                                          keyboardBottomPaddingDp = 0,
+                                          resizePreviewMarginStartDp = 0,
+                                          resizePreviewMarginEndDp = 0,
+                                      )
+                                  },
+                                  onConfirm = {
+                                      val snapshot = uiState.value
+                                      schemaController.setKeyboardHeight(snapshot.resizePreviewHeightDp)
+                                      SettingsPreferences.setKeyboardBottomPaddingDp(this@XimeInputMethodService, snapshot.keyboardBottomPaddingDp)
+                                      SettingsPreferences.setKeyboardMarginStartDp(this@XimeInputMethodService, snapshot.resizePreviewMarginStartDp)
+                                      SettingsPreferences.setKeyboardMarginEndDp(this@XimeInputMethodService, snapshot.resizePreviewMarginEndDp)
+                                      uiState.value = snapshot.copy(
+                                          showKeyboardResize = false,
+                                          keyboardHeightDp = snapshot.resizePreviewHeightDp,
+                                          keyboardMarginStartDp = snapshot.resizePreviewMarginStartDp,
+                                          keyboardMarginEndDp = snapshot.resizePreviewMarginEndDp,
+                                      )
+                                  },
+                                  onCancel = {
+                                      val restoreHeight = SettingsPreferences.getKeyboardHeightDp(this@XimeInputMethodService, isLandscape)
+                                      val restoreStart = SettingsPreferences.getKeyboardMarginStartDp(this@XimeInputMethodService)
+                                      val restoreEnd = SettingsPreferences.getKeyboardMarginEndDp(this@XimeInputMethodService)
+                                      uiState.value = uiState.value.copy(
+                                          showKeyboardResize = false,
+                                          keyboardHeightDp = restoreHeight,
+                                          resizePreviewHeightDp = restoreHeight,
+                                          keyboardBottomPaddingDp = SettingsPreferences.getKeyboardBottomPaddingDp(this@XimeInputMethodService),
+                                          keyboardMarginStartDp = restoreStart,
+                                          resizePreviewMarginStartDp = restoreStart,
+                                          keyboardMarginEndDp = restoreEnd,
+                                          resizePreviewMarginEndDp = restoreEnd,
+                                      )
+                                  },
+                                  modifier = Modifier.matchParentSize()
                               )
                           }
                            }
