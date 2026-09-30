@@ -7,6 +7,7 @@ import android.view.KeyEvent
 import android.view.inputmethod.InputConnection
 import android.widget.Toast
 import com.kingzcheung.xime.MainActivity
+import com.kingzcheung.xime.ui.keyboard.FloatingCardGeometry
 import com.kingzcheung.xime.ui.keyboard.isHandwritingSchema
 import com.kingzcheung.xime.settings.KeysConfigHelper
 import com.kingzcheung.xime.settings.SchemaConfigHelper
@@ -16,7 +17,6 @@ import com.kingzcheung.xime.settings.SettingsPreferences
 import com.kingzcheung.xime.ui.theme.KeyboardThemes
 import com.kingzcheung.xime.util.FileLogger
 import java.io.File
-import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -337,26 +337,26 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
         // 再提示"键盘高度已调整"是多余噪音
     }
 
-    internal fun toggleFloatingMode(enabled: Boolean, navBarDp: Int = 0) {
+    internal fun toggleFloatingMode(enabled: Boolean) {
         val isLandscape = service.resources.configuration.screenWidthDp > service.resources.configuration.screenHeightDp
         SettingsPreferences.setFloatingMode(service, enabled, isLandscape)
         val loadedX = SettingsPreferences.getFloatingOffsetX(service, isLandscape)
-        val loadedY = SettingsPreferences.getFloatingOffsetY(service, isLandscape)
         val screenW = service.resources.configuration.screenWidthDp
         val screenH = service.resources.configuration.screenHeightDp
         val portraitWidth = minOf(screenW, screenH)
-        val cardWidth = (portraitWidth * 0.85f).roundToInt()
-        val halfMargin = maxOf(0, (screenW - cardWidth) / 2)
-        val cappedKbH = SettingsPreferences.getKeyboardHeightDp(service, isLandscape).coerceAtMost((screenH * 8) / 10)
+        val halfMargin = FloatingCardGeometry.halfMarginDp(screenW, portraitWidth)
         val clampedX = loadedX.coerceIn(-halfMargin, halfMargin)
         service.uiState.value = service.uiState.value.copy(
             isFloatingMode = enabled,
             floatingOffsetX = clampedX,
+            // 开启悬浮归位到底部；垂直位置由拖动重新记忆（落盘值在下次加载时恢复）
             floatingOffsetY = 0,
         )
         if (enabled) {
             service.closeToolPanel()
-            service.currentEffectiveKeyboardHeight = cappedKbH + 18 + 50 + service.uiState.value.keyboardBottomPaddingDp
+            // 清掉上一轮的实测矩形：新卡片矩形未建立前，触摸区/钳制走 FloatingCardGeometry 兜底
+            service.floatingCardBounds = null
+            service.currentFloatingCardHeightDp = 0
         }
         service.applyWindowBackground()
     }

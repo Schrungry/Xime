@@ -10,6 +10,7 @@ import com.kingzcheung.xime.keyboard.OverlayRoute
 import com.kingzcheung.xime.rime.T9InputController
 import com.kingzcheung.xime.rime.RimeProcessResult
 import com.kingzcheung.xime.settings.SettingsPreferences
+import com.kingzcheung.xime.ui.keyboard.FloatingCardGeometry
 import com.kingzcheung.xime.ui.keyboard.KeyboardCallbacks
 import com.kingzcheung.xime.ui.keyboard.isT9Schema
 import com.kingzcheung.xime.util.FileLogger
@@ -23,15 +24,14 @@ import kotlinx.coroutines.withContext
  * 构建键盘回调集合（KeyboardCallbacks）。
  *
  * 所有回调直接操作服务层状态与方法；service 内部成员对同模块可见（internal）。
- * 与原始实现在 onCreateInputView 内联构建的行为完全一致：
- * 仅当 [floatingMinY] 变化时重建（remember key 与原实现相同）。
+ * 仅当 [floatingMinY] 变化时重建；回调体内一律读 [XimeInputMethodService.uiState]
+ * 现值——此前闭包捕获组合期的 state/effectiveScreenH，remember 只以 floatingMinY
+ * 为 key，回调会拿着首组过期值工作（如悬浮拖动用了过期的屏幕高与模式开关）。
  */
 @Composable
 internal fun rememberImeKeyboardCallbacks(
     service: XimeInputMethodService,
     floatingMinY: Int,
-    state: InputUIState,
-    effectiveScreenH: Int,
 ): KeyboardCallbacks {
     val view = LocalView.current
     return remember(floatingMinY) {
@@ -286,19 +286,40 @@ internal fun rememberImeKeyboardCallbacks(
                 }
             },
             onDismissDeploying = { service.notifyDeploymentStatus(false, "") },
-            onFloatingModeChange = { enabled -> service.schemaController.toggleFloatingMode(enabled, floatingMinY) },
+            onFloatingModeChange = { enabled -> service.schemaController.toggleFloatingMode(enabled) },
             onFloatingKeyboardDrag = { dx, dy ->
                 val s = service.uiState.value
-                val screenW = service.resources.configuration.screenWidthDp
-                val screenH = if (state.isFloatingMode) effectiveScreenH else service.resources.configuration.screenHeightDp
-                val portraitWidth = minOf(screenW, screenH)
-                val cardWidth = (portraitWidth * 0.85f).roundToInt()
-                val halfMargin = ((screenW - cardWidth) / 2f).roundToInt()
+                val config = service.resources.configuration
+                val screenW = config.screenWidthDp
+                val portraitWidth = minOf(screenW, config.screenHeightDp)
+                val halfMargin = FloatingCardGeometry.halfMarginDp(screenW, portraitWidth)
+                // dx/dy 为原始屏幕位移（+x 右、+y 下）：x 直接累加，y 与 offsetY
+                // 方向相反（offsetY = 卡片离底边的距离，上拖 dy<0 → 卡片上移）
                 val newX = (s.floatingOffsetX + dx).roundToInt().coerceIn(-halfMargin, halfMargin)
-                val newY_raw = (s.floatingOffsetY + dy).roundToInt()
-                val actualCardH = if (service.currentFloatingCardHeightDp > 0) service.currentFloatingCardHeightDp else service.currentEffectiveKeyboardHeight
-                val maxOffsetY = (screenH - actualCardH).coerceAtLeast(floatingMinY)
-                val newY = newY_raw.coerceIn(0, maxOffsetY)
+                // 卡高以实测（onCardPositioned）为唯一真源，首帧实测前走几何兜底
+                val cardHeightDp = if (service.currentFloatingCardHeightDp > 0) {
+                    service.currentFloatingCardHeightDp
+                } else {
+                    FloatingCardGeometry.fallbackCardHeightDp(
+                        SettingsPreferences.getKeyboardHeightDp(service, false)
+                            .coerceAtMost((config.screenHeightDp * 8) / 10),
+                        s.keyboardBottomPaddingDp,
+                    )
+                }
+                // 悬浮卡片恒为竖屏形态：有效屏高 = 物理高 - 状态栏（与 setContent 一致）
+                val screenH = if (s.isFloatingMode) {
+                    val metrics = service.resources.displayMetrics
+                    (metrics.heightPixels / metrics.density).roundToInt() -
+                        tryGetStatusBarHeightDp(service, service.window.window)
+                } else {
+                    config.screenHeightDp
+                }
+                val newY = FloatingCardGeometry.clampOffsetY(
+                    (s.floatingOffsetY - dy).roundToInt(),
+                    minY = floatingMinY,
+                    screenHeightDp = screenH,
+                    cardHeightDp = cardHeightDp,
+                )
                 service.uiState.value = s.copy(
                     floatingOffsetX = newX,
                     floatingOffsetY = newY,
