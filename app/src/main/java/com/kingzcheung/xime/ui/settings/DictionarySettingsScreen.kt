@@ -1,5 +1,7 @@
 package com.kingzcheung.xime.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,12 +20,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -37,8 +41,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -50,10 +56,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,29 +68,57 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kingzcheung.xime.settings.DictEntry
+import com.kingzcheung.xime.settings.PersonalDictManager
+import com.kingzcheung.xime.settings.UserDictIoManager
 import com.kingzcheung.xime.viewmodel.CustomPhraseUiState
 import com.kingzcheung.xime.viewmodel.CustomPhraseViewModel
-import com.kingzcheung.xime.viewmodel.PersonalDictUiState
-import com.kingzcheung.xime.viewmodel.PersonalDictViewModel
+import com.kingzcheung.xime.viewmodel.DictionarySettingsViewModel
+import com.kingzcheung.xime.viewmodel.UserDictUiState
+import com.kingzcheung.xime.viewmodel.UserDictViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
+/**
+ * 词库管理：三个页签分别对应三类数据 ——
+ *  - 自定义短语：用户手写的 custom_phrase（可增删改，FAB 只在它这里出现）
+ *  - 用户词库：打字造词产生、由 librime 写进 leveldb 的 `<词典名>.userdb`（只读）
+ *  - 方案词库：随方案分发的静态 `.dict.yaml`（含 import_tables 与 translator.packs）
+ *
+ * 「个人词库」页签已移除：它读的是 `user_<词典名>.dict.yaml`（方案里的静态码表），
+ * 与「方案词库」重复且实际设备上恒为空。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DictionarySettingsContent(
     onBack: () -> Unit
 ) {
-    val viewModel: PersonalDictViewModel = viewModel()
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val schemaVM: DictionarySettingsViewModel = viewModel()
+    val schemaState by schemaVM.uiState.collectAsStateWithLifecycle()
     var selectedDictTab by remember { mutableIntStateOf(0) }
     var showSchemaMenu by remember { mutableStateOf(false) }
     val customPhraseVM: CustomPhraseViewModel = viewModel(key = "dict_custom_phrase")
     val customPhraseState by customPhraseVM.uiState.collectAsStateWithLifecycle()
-    LaunchedEffect(uiState.selectedSchema) { customPhraseVM.setSchema(uiState.selectedSchema) }
+    val userDictVM: UserDictViewModel = viewModel(key = "dict_user_dict")
+    val userDictState by userDictVM.uiState.collectAsStateWithLifecycle()
+
+    // 切换方案：补齐该方案的 custom_phrase 翻译器补丁，并让自定义短语跟随方案
+    LaunchedEffect(schemaState.selectedSchema) {
+        val schemaId = schemaState.selectedSchema
+        if (schemaId.isEmpty()) return@LaunchedEffect
+        withContext(Dispatchers.IO) { PersonalDictManager.ensureSchemaPack(context, schemaId) }
+        customPhraseVM.setSchema(schemaId)
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    val schema = uiState.availableSchemas.find { it.schemaId == uiState.selectedSchema }
-                    Text("词库管理 - ${schema?.name ?: uiState.selectedSchema}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val schema = schemaState.availableSchemas.find { it.schemaId == schemaState.selectedSchema }
+                    Text("词库管理 - ${schema?.name ?: schemaState.selectedSchema}", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -96,8 +130,8 @@ fun DictionarySettingsContent(
                         modifier = Modifier.clickable { showSchemaMenu = true },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val schema = uiState.availableSchemas.find { it.schemaId == uiState.selectedSchema }
-                        Text(schema?.name ?: uiState.selectedSchema, style = MaterialTheme.typography.bodyMedium)
+                        val schema = schemaState.availableSchemas.find { it.schemaId == schemaState.selectedSchema }
+                        Text(schema?.name ?: schemaState.selectedSchema, style = MaterialTheme.typography.bodyMedium)
                         Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
                     }
                     DropdownMenu(
@@ -106,10 +140,10 @@ fun DictionarySettingsContent(
                         offset = DpOffset(0.dp, 4.dp),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        for (s in uiState.availableSchemas) {
+                        for (s in schemaState.availableSchemas) {
                             DropdownMenuItem(
                                 text = { Text(s.name) },
-                                onClick = { showSchemaMenu = false; viewModel.selectSchema(s.schemaId) }
+                                onClick = { showSchemaMenu = false; schemaVM.selectSchema(s.schemaId) }
                             )
                         }
                     }
@@ -121,7 +155,8 @@ fun DictionarySettingsContent(
             )
         },
         floatingActionButton = {
-            // 个人词库已改为只读，仅自定义短语支持增删改
+            // 只有自定义短语支持增删改：用户词库是打字造词产生的（只读），
+            // 方案词库是随方案分发的静态码表
             if (selectedDictTab == 0) {
                 FloatingActionButton(
                     onClick = { customPhraseVM.showAddDialog() },
@@ -133,97 +168,112 @@ fun DictionarySettingsContent(
         }
     ) { innerPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                TabButton("自定义短语", selected = selectedDictTab == 0, onClick = { selectedDictTab = 0 }, modifier = Modifier.weight(1f))
-                Spacer(modifier = Modifier.width(8.dp))
-                TabButton("个人词库", selected = selectedDictTab == 1, onClick = { selectedDictTab = 1 }, modifier = Modifier.weight(1f))
-                Spacer(modifier = Modifier.width(8.dp))
-                TabButton("方案词库", selected = selectedDictTab == 2, onClick = { selectedDictTab = 2 }, modifier = Modifier.weight(1f))
+            PrimaryTabRow(selectedTabIndex = selectedDictTab) {
+                Tab(
+                    selected = selectedDictTab == 0,
+                    onClick = { selectedDictTab = 0 },
+                    text = { Text("自定义短语", maxLines = 1) }
+                )
+                Tab(
+                    selected = selectedDictTab == 1,
+                    onClick = { selectedDictTab = 1 },
+                    text = { Text("用户词库", maxLines = 1) }
+                )
+                Tab(
+                    selected = selectedDictTab == 2,
+                    onClick = { selectedDictTab = 2 },
+                    text = { Text("方案词库", maxLines = 1) }
+                )
             }
             when (selectedDictTab) {
                 0 -> CustomPhraseTabContent(viewModel = customPhraseVM, uiState = customPhraseState)
-                1 -> SchemaDictContent(viewModel = viewModel, uiState = uiState)
-                2 -> SchemaDictBrowserPanel()
+                1 -> UserDictTabContent(viewModel = userDictVM, uiState = userDictState)
+                2 -> SchemaDictBrowserPanel(viewModel = schemaVM, showSchemaSwitcher = false)
             }
         }
     }
 }
 
+/**
+ * 「用户词库」页签：打字造词产生的 `<词典名>.userdb`（librime leveldb）。
+ * 只读：列表 → 点进某本看词条。读取需在 native 侧销毁/重建输入会话，故用
+ * [UserDictUiState.isReading] 反馈等待。
+ */
 @Composable
-private fun TabButton(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(10.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
-    ) {
-        Box(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
-            Text(text, style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+private fun UserDictTabContent(
+    viewModel: UserDictViewModel,
+    uiState: UserDictUiState,
+) {
+    val opened = uiState.openedDict
+    if (opened == null) {
+        UserDictList(viewModel = viewModel, uiState = uiState)
+    } else {
+        UserDictEntries(viewModel = viewModel, uiState = uiState, dictName = opened)
     }
 }
 
 @Composable
-private fun SchemaDictContent(
-    viewModel: PersonalDictViewModel,
-    uiState: PersonalDictUiState
+private fun UserDictList(
+    viewModel: UserDictViewModel,
+    uiState: UserDictUiState,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        Spacer(modifier = Modifier.height(12.dp))
-        Surface(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(28.dp),
-            tonalElevation = 2.dp,
-            color = MaterialTheme.colorScheme.surface
-        ) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Search, contentDescription = null,
-                    tint = if (uiState.searchQuery.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(22.dp))
-                Spacer(modifier = Modifier.width(12.dp))
-                BasicTextField(value = uiState.searchQuery, onValueChange = { viewModel.setSearchQuery(it) },
-                    modifier = Modifier.weight(1f), singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                    decorationBox = { innerTextField ->
-                        Box { if (uiState.searchQuery.isEmpty()) Text("搜索", color = MaterialTheme.colorScheme.onSurfaceVariant); innerTextField() }
-                    })
-                if (uiState.searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.clearSearch() }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Clear, contentDescription = "清除", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                    }
+        Text(
+            "用户词库由打字造词自动生成，此处只读查看；跨设备搬运请用「同步与备份」里的词库同步。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+        )
+        when {
+            uiState.isLoading -> {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
             }
-        }
-
-        if (uiState.isLoading) {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        } else {
-            Text("共 ${uiState.entries.size} 条${if (uiState.searchQuery.isNotEmpty()) "，搜索结果 ${uiState.filteredEntries.size} 条" else ""}",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-
-            if (uiState.entries.isEmpty()) {
+            uiState.dicts.isEmpty() -> {
                 Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    UsageHint()
+                    UsageHint(
+                        title = "还没有用户词库",
+                        message = "用某个方案打过字之后，引擎会自动生成对应的 .userdb",
+                        action = "查看词库说明 →"
+                    )
                 }
-            } else if (uiState.filteredEntries.isEmpty()) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("未找到匹配条目", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp)) {
-                    itemsIndexed(items = uiState.filteredEntries,
-                        key = { i, e -> "${e.word}_${e.code}_$i" }) { _, entry ->
-                        // 个人词库只读，不提供编辑/删除
-                        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
+            }
+            else -> {
+                Text(
+                    "共 ${uiState.dicts.size} 本",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    itemsIndexed(items = uiState.dicts, key = { _, d -> d.name }) { _, dict ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clickable { viewModel.open(dict.name) },
+                            shape = RoundedCornerShape(12.dp),
+                            tonalElevation = 2.dp,
+                            color = MaterialTheme.colorScheme.surface
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(entry.word, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                                    Text(entry.code, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                    Text(dict.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        "最近更新 ${formatUserDictTime(dict.lastModified)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
@@ -234,7 +284,214 @@ private fun SchemaDictContent(
 }
 
 @Composable
-private fun UsageHint() {
+@OptIn(ExperimentalMaterial3Api::class)
+private fun UserDictEntries(
+    viewModel: UserDictViewModel,
+    uiState: UserDictUiState,
+    dictName: String,
+) {
+    // 导出到 / 从系统文件选择器导入：均走 librime 的文本码表（与 PC 端同格式）
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) viewModel.exportTo(uri)
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) viewModel.importFrom(uri)
+    }
+    var showMenu by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { viewModel.close() }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回词库列表")
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(dictName, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (uiState.searchQuery.isEmpty()) "${uiState.entries.size} 条"
+                    else "匹配 ${uiState.filteredEntries.size} / ${uiState.entries.size} 条",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (uiState.isTransferring) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "更多操作")
+                    }
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("导出文本码表") },
+                            onClick = {
+                                showMenu = false
+                                exportLauncher.launch(UserDictIoManager.exportFileName(dictName))
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("导入文本码表") },
+                            onClick = {
+                                showMenu = false
+                                importLauncher.launch(arrayOf("*/*"))
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        uiState.message?.let { message ->
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = if (uiState.messageIsError) MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.secondaryContainer
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (uiState.messageIsError) MaterialTheme.colorScheme.onErrorContainer
+                        else MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.weight(1f).padding(vertical = 12.dp)
+                    )
+                    IconButton(onClick = { viewModel.dismissMessage() }) {
+                        Icon(
+                            Icons.Default.Clear, contentDescription = "关闭提示",
+                            modifier = Modifier.size(18.dp),
+                            tint = if (uiState.messageIsError) MaterialTheme.colorScheme.onErrorContainer
+                            else MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(28.dp),
+            tonalElevation = 2.dp,
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Search, contentDescription = null,
+                    tint = if (uiState.searchQuery.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                BasicTextField(
+                    value = uiState.searchQuery, onValueChange = { viewModel.setSearchQuery(it) },
+                    modifier = Modifier.weight(1f), singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (uiState.searchQuery.isEmpty()) {
+                                Text("搜索词条或编码", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            innerTextField()
+                        }
+                    }
+                )
+                if (uiState.searchQuery.isNotEmpty()) {
+                    Spacer(Modifier.width(8.dp))
+                    IconButton(onClick = { viewModel.clearSearch() }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Clear, contentDescription = "清除搜索", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        when {
+            uiState.isReading -> {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "正在读取词库…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            uiState.entries.isEmpty() -> {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    UsageHint(
+                        title = "这本词库还没有词条",
+                        message = "继续用该方案打字，造词会自动写进用户词库",
+                        action = "返回词库列表 →"
+                    )
+                }
+            }
+            uiState.filteredEntries.isEmpty() -> {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("未找到匹配条目", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            else -> {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    itemsIndexed(
+                        items = uiState.filteredEntries,
+                        key = { i, e -> "${e.word}_${e.code}_$i" }
+                    ) { _, entry ->
+                        // 用户词库只读：词条由引擎在打字过程中写入
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surface
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(entry.word, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                                    Text(entry.code, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                }
+                                if (entry.weight != null) {
+                                    Text(
+                                        "频率 ${entry.weight}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val userDictTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+
+private fun formatUserDictTime(timestamp: Long): String =
+    if (timestamp <= 0L) "未知" else userDictTimeFormat.format(Date(timestamp))
+
+@Composable
+private fun UsageHint(
+    title: String,
+    message: String,
+    action: String,
+) {
     val uriHandler = LocalUriHandler.current
     Column(
         modifier = Modifier
@@ -245,14 +502,14 @@ private fun UsageHint() {
         Icon(Icons.Default.Info, contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
         Spacer(Modifier.height(12.dp))
-        Text("暂无词条", style = MaterialTheme.typography.titleMedium,
+        Text(title, style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(4.dp))
-        Text("个人词库当前仅支持查看",
+        Text(message,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(16.dp))
-        Text("自定义短语的增删改 → 切换「自定义短语」标签页",
+        Text(action,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary)
     }
@@ -299,7 +556,11 @@ private fun CustomPhraseTabContent(
             }
         } else if (uiState.entries.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                UsageHint()
+                UsageHint(
+                    title = "暂无词条",
+                    message = "自定义短语用于补充方案码表之外的常用短语",
+                    action = "点右下角「+」添加，然后在「输入方案」重新部署即可生效"
+                )
             }
         } else {
             LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
