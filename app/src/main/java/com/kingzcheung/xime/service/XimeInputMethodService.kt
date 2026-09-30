@@ -59,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kingzcheung.xime.ui.keyboard.FloatingCardGeometry
+import com.kingzcheung.xime.ui.keyboard.FloatingExitGlow
 import com.kingzcheung.xime.ui.keyboard.KeyboardResizeOverlay
 import com.kingzcheung.xime.ui.keyboard.HardwareKeyboardCandidateBar
 import androidx.core.content.FileProvider
@@ -241,6 +242,9 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     internal val mainHandler = Handler(Looper.getMainLooper())
     
     internal val uiState = mutableStateOf(InputUIState())
+    /** 悬浮键盘拖到底部"松手切换非悬浮"的提示态：拖动回调边沿写入（进入时震动一次），
+     *  松手在 onFloatingKeyboardDragEnd 消费；底部光效（FloatingExitGlow）按它显隐 */
+    internal val floatingExitHintState = mutableStateOf(false)
     internal val candidateState = mutableStateOf(CandidateState())
     private val clipboardItemsState = mutableStateOf<List<com.kingzcheung.xime.clipboard.ClipboardItem>>(emptyList())
     private val voiceAmplitudeState = mutableFloatStateOf(0f)
@@ -1721,6 +1725,21 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                            }
                             if (!state.isFloatingMode && navBarDp > 0.dp) {
                                 Spacer(modifier = Modifier.fillMaxWidth().height(navBarDp))
+                            }
+                            // 悬浮拖到底部的停靠提示光：必须是根 Box 最后一个子级
+                            // （画在键盘内容之上）——第一版画在卡片后面，手势导航设备上
+                            // minY=0、卡片底边贴住窗口底边，光晕几乎全被卡片挡住而不可见。
+                            // 颜色取主题强调色；x 含 offsetX 与卡片对齐。
+                            if (state.isFloatingMode && floatingExitHintState.value) {
+                                FloatingExitGlow(
+                                    offsetXdp = state.floatingOffsetX,
+                                    cardWidthDp = FloatingCardGeometry.cardWidthDp(minOf(screenWidthDp, screenHeightDp)),
+                                    bottomGapDp = floatingMinY,
+                                    glowColor = accentCol,
+                                    modifier = Modifier
+                                        .align(androidx.compose.ui.Alignment.BottomCenter)
+                                        .offset(x = state.floatingOffsetX.dp),
+                                )
                             }
                        }
                       }
