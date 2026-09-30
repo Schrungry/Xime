@@ -237,9 +237,10 @@ fun KeyboardView(
     val screenW = LocalConfiguration.current.screenWidthDp
     val screenH = LocalConfiguration.current.screenHeightDp
     val portraitScreenWidth = minOf(screenW, screenH)
-    val cardWidthDp = (portraitScreenWidth * 0.85f).roundToInt()
-    val floatScaleFactor = if (state.isFloatingMode) cardWidthDp.toFloat() / screenW.toFloat() else 0.85f
-    val floatFontScale = if (state.isFloatingMode) cardWidthDp.toFloat() / portraitScreenWidth.toFloat() else 1f
+    val cardWidthDp = FloatingCardGeometry.cardWidthDp(portraitScreenWidth)
+    val floatScaleFactor = if (state.isFloatingMode) FloatingCardGeometry.widthFraction(portraitScreenWidth, screenW)
+        else FloatingCardGeometry.CARD_SCALE
+    val floatFontScale = if (state.isFloatingMode) FloatingCardGeometry.CARD_SCALE else 1f
     // 键盘调节支持左右收窄后，实际渲染宽 ≠ 屏宽（屏幕宽度只作首帧兜底）：
     // 展开候选页的行宽/九键左栏宽度按实测宽计算，收窄后不高估每行容量
     val densityForMeasure = LocalDensity.current
@@ -258,7 +259,6 @@ fun KeyboardView(
         fontScaleFactor = floatFontScale,
         offsetX = state.floatingOffsetX,
         offsetY = state.floatingOffsetY,
-        minOffsetY = state.floatingMinOffsetY,
         backgroundColor = keyboardBgColor,
         onDrag = { dx, dy -> callbacks.onFloatingKeyboardDrag?.invoke(dx, dy) },
         onDragEnd = { callbacks.onFloatingKeyboardDragEnd?.invoke() },
