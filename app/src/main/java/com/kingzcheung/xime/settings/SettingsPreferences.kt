@@ -598,11 +598,10 @@ object SettingsPreferences {
 
     fun getKeyboardHeightDp(context: Context, isLandscape: Boolean): Int {
         val key = if (isLandscape) KEY_KEYBOARD_HEIGHT_DP_LANDSCAPE else KEY_KEYBOARD_HEIGHT_DP
-        val alt = if (isLandscape) KEY_KEYBOARD_HEIGHT_DP else KEY_KEYBOARD_HEIGHT_DP_LANDSCAPE
         val stored = getPrefs(context).getInt(key, -1)
         if (stored > 0) return stored
-        val altStored = getPrefs(context).getInt(alt, -1)
-        if (altStored > 0) return altStored
+        // 不做跨方向回退：竖屏高度（可达屏高 60%）放到横屏短边上必然超出屏幕
+        // （曾表现为"横屏键盘高得离谱"），横竖屏各自用自己的键 + 自己的默认值
         return getDefaultKeyboardHeightDp(context, isLandscape)
     }
 
