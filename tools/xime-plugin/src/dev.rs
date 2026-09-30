@@ -11,6 +11,7 @@
 // 依赖：adb（PATH / ANDROID_HOME / ANDROID_SDK_ROOT / --adb），USB 或无线调试均可。
 // 宿主侧要求：DevPluginInstallActivity（app/src/main，exported=true，开发模式开关门禁）。
 
+use std::cell::RefCell;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -48,7 +49,9 @@ enum DevChannel {
 #[derive(Clone)]
 pub struct Adb {
     exe: PathBuf,
-    serial: Option<String>,
+    /// 目标设备序列号。`--device` 显式指定时保持不变；未指定时由 [Adb::ensure_device]
+    /// 从 `adb devices` 里挑出唯一的在线设备并**记住**（RefCell 使其在 `&self` 上就地解析）。
+    serial: RefCell<Option<String>>,
 }
 
 impl Adb {
@@ -68,20 +71,20 @@ impl Adb {
                     .map(|h| PathBuf::from(h).join("platform-tools").join(bin))
             })
             .unwrap_or_else(|| PathBuf::from("adb"));
-        let adb = Self { exe, serial: None };
+        let adb = Self { exe, serial: RefCell::new(None) };
         adb.run(&["version"])
             .with_context(|| format!("adb 不可用（{}）。请安装 Android SDK Platform-Tools 或指定 --adb", adb.exe.display()))?;
         Ok(adb)
     }
 
     pub fn with_serial(mut self, serial: Option<String>) -> Self {
-        self.serial = serial;
+        self.serial = RefCell::new(serial);
         self
     }
 
     fn cmd(&self) -> Command {
         let mut cmd = Command::new(&self.exe);
-        if let Some(s) = &self.serial {
+        if let Some(s) = self.serial.borrow().as_ref() {
             cmd.arg("-s").arg(s);
         }
         cmd
@@ -103,18 +106,60 @@ impl Adb {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
-    /// 设备在线检查（无设备给出明确提示，含无线调试引导）。
+    /// 设备在线检查；未显式指定 `--device` 时**自动采用唯一的在线设备**并固定下来。
+    ///
+    /// 不再直接依赖裸 `adb get-state`：无线调试（`adb-tls-connect`）下这个"默认设备"查询
+    /// 经常返回空串，而且设备列表里只要残留一条 offline transport（重复 `adb connect` 的
+    /// 常见后果）就必然失败——用户看到的是"未检测到在线设备（adb get-state = ""）"或
+    /// 后续命令报 "more than one device/emulator"。这里改为解析 `adb devices`，把选中的
+    /// 序列号记住，后续所有 adb 调用都带 `-s`，从根上避开默认设备解析。
     pub fn ensure_device(&self) -> Result<()> {
+        if self.serial.borrow().is_none() {
+            let serial = self.detect_single_online_device()?;
+            *self.serial.borrow_mut() = Some(serial);
+        }
         let state = self.run(&["get-state"]).unwrap_or_default();
         if state.trim() != "device" {
+            let serial = self.serial.borrow().clone().unwrap_or_default();
             anyhow::bail!(
-                "未检测到在线设备（adb get-state = {:?}）。\n\
-                 提示：USB 调试请确认已授权；无线调试可用：\n  \
-                 adb pair <ip:port> && adb connect <ip:port>",
+                "设备 {serial} 不在线（adb get-state = {:?}）。\n\
+                 提示：无线调试断流时可 `adb disconnect {serial}` 后重新 connect",
                 state.trim()
             );
         }
         Ok(())
+    }
+
+    /// 解析 `adb devices`：唯一在线 → 采用；多台在线 → 列出序列号要求 `--device`；
+    /// 无在线 → 给可操作提示（offline / unauthorized 分别说明怎么处理）。
+    fn detect_single_online_device(&self) -> Result<String> {
+        let out = self.run(&["devices"])?;
+        let (online, offline, unauthorized) = classify_devices(&out);
+        if online.len() == 1 {
+            return Ok(online[0].clone());
+        }
+        if online.len() > 1 {
+            anyhow::bail!(
+                "检测到多台在线设备：{}\n请用 --device <序列号> 指定（无线调试常见于 \
+                 `adb connect` 与 mDNS 各注册一条同设备 transport）",
+                online.join(", ")
+            );
+        }
+        let mut msg = String::from("未检测到在线设备。\n");
+        if !offline.is_empty() {
+            msg.push_str(&format!(
+                "（offline transport：{} —— 执行 `adb disconnect <序列号>` 后重连）\n",
+                offline.join(", ")
+            ));
+        }
+        if !unauthorized.is_empty() {
+            msg.push_str(&format!(
+                "（未授权：{} —— 请在手机上确认 USB 调试授权弹窗）\n",
+                unauthorized.join(", ")
+            ));
+        }
+        msg.push_str("提示：USB 调试请确认已授权；无线调试可用：\n  adb pair <ip:port> && adb connect <ip:port>");
+        anyhow::bail!(msg)
     }
 
     pub fn shell(&self, args: &[&str]) -> Result<String> {
@@ -130,28 +175,37 @@ impl Adb {
         self.shell(&full)
     }
 
-    /// 管道写入 app 内部目录（绕开 /sdcard Android/data 在部分 ROM 上的访问限制）：
-    /// 本地文件 → stdin → `run-as sh -c 'cat > files/xipm-dev/<name>'`。
+    /// 写入 app 内部目录（绕开 /sdcard Android/data 在部分 ROM 上的访问限制）。
+    ///
+    /// 走 `adb push` 到 /data/local/tmp 后再 `run-as cat` 拷进内部目录，**不再把二进制包
+    /// 灌进 `adb shell` 的 stdin**：实测（platform-tools 37.0.0 / 无线调试 / Android 15）
+    /// `adb shell -T "run-as … sh -c 'cat > …'" < x.xipk` 只落地前 646 字节
+    /// （5677 → 646），宿主解析即报 `zip END header not found`。中转方式与 [push_compat] 同源。
     /// 返回设备上的内部绝对路径（供广播 extra 使用）。
     pub fn push_to_internal(&self, package: &str, name: &str, local: &Path) -> Result<String> {
-        let stdin = std::fs::File::open(local)
-            .with_context(|| format!("打开本地插件包失败: {}", local.display()))?;
-        let remote_cmd = format!("run-as {package} sh -c 'cat > files/xipm-dev/{name}'");
-        let out = self
-            .cmd()
-            .arg("shell")
-            .arg("-T") // 禁用 PTY：保证 stdin 二进制不被终端规则破坏
-            .arg(&remote_cmd)
-            .stdin(Stdio::from(stdin))
-            .output()
-            .with_context(|| "管道写入设备内部目录失败")?;
-        if !out.status.success() {
-            anyhow::bail!(
-                "写入设备内部目录失败: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
+        let tmp = format!("{COMPAT_DEV_DIR}/{name}");
+        let expect = std::fs::metadata(local).map(|m| m.len()).unwrap_or(0);
+        self.shell(&["mkdir", "-p", COMPAT_DEV_DIR])?;
+        self.run(&["push", local.to_string_lossy().as_ref(), tmp.as_str()])
+            .with_context(|| format!("adb push 到 {tmp} 失败"))?;
+        // 应用可读的最低权限；拷完立即删除中转副本，缩短其他应用可读窗口
+        self.shell(&["chmod", "644", &tmp])?;
+        // 整条命令作为一个参数下发：重定向必须在内层 `sh -c` 的引号里，
+        // 否则会被外层 shell（cwd=/，无写权限）先解析而报 "No such file or directory"
+        let remote_cmd = format!("run-as {package} sh -c 'cat {tmp} > files/{DEV_DIR}/{name}'");
+        self.shell(&[remote_cmd.as_str()])?;
+        let _ = self.shell(&["rm", "-f", &tmp]);
+        // 校验落地字节数：宁可在这里明确失败，也别让宿主拿着半个 zip 报"配置解析失败"
+        let listed = self.run_as(package, &["ls", "-l", &format!("files/{DEV_DIR}/{name}")])?;
+        if let Some(actual) = listed.split_whitespace().nth(4).and_then(|v| v.parse::<u64>().ok()) {
+            if expect != 0 && actual != expect {
+                anyhow::bail!(
+                    "插件包落地字节数不符（本地 {expect} / 设备 {actual} bytes）：\
+                     设备内部目录写入失败，请重试或改用 --device/重新插拔 adb"
+                );
+            }
         }
-        Ok(format!("/data/user/0/{package}/files/xipm-dev/{name}"))
+        Ok(format!("/data/user/0/{package}/files/{DEV_DIR}/{name}"))
     }
 
     /// release 兼容通道推送：/data/local/tmp（shell 可写、应用可读；宿主装后删除）。
@@ -800,6 +854,34 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
 }
 
+/// 把 `adb devices` 输出分类成（在线 / offline / 未授权）三组序列号。
+///
+/// 抽成纯函数以便免真机单测：无线调试下 transport 重复注册或掉线（手动 `adb connect`
+/// 的那条变 offline、mDNS 那条还在线）是最高频的故障源。
+fn classify_devices(output: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let mut online = Vec::new();
+    let mut offline = Vec::new();
+    let mut unauthorized = Vec::new();
+    for line in output.lines().skip(1) {
+        let mut it = line.split_whitespace();
+        let serial = match it.next() {
+            Some(v) => v,
+            None => continue,
+        };
+        let state = match it.next() {
+            Some(v) => v,
+            None => continue,
+        };
+        match state {
+            "device" => online.push(serial.to_string()),
+            "offline" => offline.push(serial.to_string()),
+            "unauthorized" => unauthorized.push(serial.to_string()),
+            _ => {}
+        }
+    }
+    (online, offline, unauthorized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -809,5 +891,31 @@ mod tests {
         assert_eq!(fmt_epoch_ms(0), "1970-01-01 00:00:00Z");
         // 2026-09-18T00:00:00Z
         assert_eq!(fmt_epoch_ms(1_789_689_600_000), "2026-09-18 00:00:00Z");
+    }
+
+    #[test]
+    fn classify_single_online_device() {
+        let out = "List of devices attached\nadb-aa386ace-pzsFrY._adb-tls-connect._tcp\tdevice\n";
+        let (online, offline, unauthorized) = classify_devices(out);
+        assert_eq!(online, vec!["adb-aa386ace-pzsFrY._adb-tls-connect._tcp"]);
+        assert!(offline.is_empty() && unauthorized.is_empty());
+    }
+
+    #[test]
+    fn classify_separates_offline_and_unauthorized() {
+        // 实测故障形态：手动 connect 的 ip:port 已掉线，mDNS 那条仍在线
+        let out = "List of devices attached\n192.168.31.66:39353\toffline\n\
+                   adb-aa386ace._adb-tls-connect._tcp\tdevice\nemulator-5554\tunauthorized\n";
+        let (online, offline, unauthorized) = classify_devices(out);
+        assert_eq!(online, vec!["adb-aa386ace._adb-tls-connect._tcp"]);
+        assert_eq!(offline, vec!["192.168.31.66:39353"]);
+        assert_eq!(unauthorized, vec!["emulator-5554"]);
+    }
+
+    #[test]
+    fn classify_ignores_header_and_unknown_states() {
+        let out = "List of devices attached\n* daemon started successfully *\n\nfoo\tbogus\n";
+        let (online, offline, unauthorized) = classify_devices(out);
+        assert!(online.is_empty() && offline.is_empty() && unauthorized.is_empty());
     }
 }
