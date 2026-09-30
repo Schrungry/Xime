@@ -121,7 +121,9 @@ private fun DragBar(
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDrag = onDrag,
-                    onDragEnd = onDragEnd
+                    onDragEnd = onDragEnd,
+                    // 手势被系统打断视同松手：保证"底部松手切换"的提示态被消费、光效不残留
+                    onDragCancel = onDragEnd,
                 )
             },
         contentAlignment = Alignment.Center

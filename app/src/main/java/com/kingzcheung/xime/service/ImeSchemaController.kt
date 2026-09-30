@@ -337,7 +337,9 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
         // 再提示"键盘高度已调整"是多余噪音
     }
 
-    internal fun toggleFloatingMode(enabled: Boolean) {
+    internal fun toggleFloatingMode(enabled: Boolean, floatingMinY: Int = 0) {
+        // 任何路径切悬浮都清掉拖动提示态（正常由拖动松手消费，这里兜底防光效残留）
+        service.floatingExitHintState.value = false
         val isLandscape = service.resources.configuration.screenWidthDp > service.resources.configuration.screenHeightDp
         SettingsPreferences.setFloatingMode(service, enabled, isLandscape)
         val loadedX = SettingsPreferences.getFloatingOffsetX(service, isLandscape)
@@ -349,8 +351,9 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
         service.uiState.value = service.uiState.value.copy(
             isFloatingMode = enabled,
             floatingOffsetX = clampedX,
-            // 开启悬浮归位到底部；垂直位置由拖动重新记忆（落盘值在下次加载时恢复）
-            floatingOffsetY = 0,
+            // 开启悬浮归位到"拖动可达的最低点"：拖动钳制下界是 floatingMinY（导航栏高），
+            // 归位到 0 会停在拖动到不了的位置（表现为比可达范围偏下一截）
+            floatingOffsetY = if (enabled) floatingMinY else 0,
         )
         if (enabled) {
             service.closeToolPanel()

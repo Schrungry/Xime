@@ -286,7 +286,7 @@ internal fun rememberImeKeyboardCallbacks(
                 }
             },
             onDismissDeploying = { service.notifyDeploymentStatus(false, "") },
-            onFloatingModeChange = { enabled -> service.schemaController.toggleFloatingMode(enabled) },
+            onFloatingModeChange = { enabled -> service.schemaController.toggleFloatingMode(enabled, floatingMinY) },
             onFloatingKeyboardDrag = { dx, dy ->
                 val s = service.uiState.value
                 val config = service.resources.configuration
@@ -314,22 +314,38 @@ internal fun rememberImeKeyboardCallbacks(
                 } else {
                     config.screenHeightDp
                 }
+                val rawY = (s.floatingOffsetY - dy).roundToInt()
                 val newY = FloatingCardGeometry.clampOffsetY(
-                    (s.floatingOffsetY - dy).roundToInt(),
+                    rawY,
                     minY = floatingMinY,
                     screenHeightDp = screenH,
                     cardHeightDp = cardHeightDp,
                 )
+                // 试图越过最低点（继续下拖）= 进入"松手切换非悬浮"提示态：边沿触发
+                // 震动一次（不逐帧），同时点亮底部光效；拖离底部即退出提示态
+                val atExitHint = rawY <= floatingMinY
+                if (atExitHint != service.floatingExitHintState.value) {
+                    service.floatingExitHintState.value = atExitHint
+                    if (atExitHint) {
+                        service.feedbackManager.performVibration()
+                    }
+                }
                 service.uiState.value = s.copy(
                     floatingOffsetX = newX,
                     floatingOffsetY = newY,
                 )
             },
             onFloatingKeyboardDragEnd = {
-                val s = service.uiState.value
-                val isLandscape = service.resources.configuration.screenWidthDp > service.resources.configuration.screenHeightDp
-                SettingsPreferences.setFloatingOffsetX(service, s.floatingOffsetX, isLandscape)
-                SettingsPreferences.setFloatingOffsetY(service, s.floatingOffsetY, isLandscape)
+                if (service.floatingExitHintState.value) {
+                    // 底部松手：切换为非悬浮（停靠），位置语义与菜单开关同一条出口
+                    service.floatingExitHintState.value = false
+                    service.schemaController.toggleFloatingMode(false)
+                } else {
+                    val s = service.uiState.value
+                    val isLandscape = service.resources.configuration.screenWidthDp > service.resources.configuration.screenHeightDp
+                    SettingsPreferences.setFloatingOffsetX(service, s.floatingOffsetX, isLandscape)
+                    SettingsPreferences.setFloatingOffsetY(service, s.floatingOffsetY, isLandscape)
+                }
             },
             onT9ReplaceFullPinyin = { pinyin ->
                 service.serviceScope.launch(service.keyProcessingDispatcher) {
