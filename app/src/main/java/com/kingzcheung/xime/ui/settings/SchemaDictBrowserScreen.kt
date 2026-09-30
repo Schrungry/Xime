@@ -49,9 +49,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kingzcheung.xime.settings.DictEntry
 import com.kingzcheung.xime.viewmodel.DictionarySettingsViewModel
 
+/**
+ * 「方案词库」浏览面板（方案 .dict.yaml 静态码表）。
+ *
+ * @param viewModel 由调用方持有的视图模型；独立页面可直接用默认值。
+ * @param showSchemaSwitcher 面板内是否显示方案下拉。作为「词库管理」页签使用时，
+ *   顶栏已有方案切换器，这里传 false 避免出现两个选择器。
+ */
 @Composable
-fun SchemaDictBrowserPanel() {
-    val viewModel: DictionarySettingsViewModel = viewModel()
+fun SchemaDictBrowserPanel(
+    viewModel: DictionarySettingsViewModel = viewModel(),
+    showSchemaSwitcher: Boolean = true,
+) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showSchemaMenu by remember { mutableStateOf(false) }
 
@@ -59,6 +68,7 @@ fun SchemaDictBrowserPanel() {
         modifier = Modifier
             .fillMaxSize()
     ) {
+        if (showSchemaSwitcher) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -120,8 +130,9 @@ fun SchemaDictBrowserPanel() {
                     }
                 }
             }
+        }
 
-            Column(
+        Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)

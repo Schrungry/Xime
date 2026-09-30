@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -365,7 +366,7 @@ fun CandidateBar(
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
-                                    .clip(RoundedCornerShape(16.dp))
+                                    .clip(CircleShape)
                                     .background(iconButtonContainer)
                                     .clickable { callbacks.onBack() },
                                 contentAlignment = Alignment.Center
@@ -381,7 +382,7 @@ fun CandidateBar(
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
-                                    .clip(RoundedCornerShape(16.dp))
+                                    .clip(CircleShape)
                                     .background(iconButtonContainer)
                                     .clickable { callbacks.onLogoClick?.invoke() },
                                 contentAlignment = Alignment.Center
@@ -596,7 +597,7 @@ fun CandidateBar(
                         Box(
                             modifier = Modifier
                                 .size(28.dp)
-                                .clip(RoundedCornerShape(14.dp))
+                                .clip(CircleShape)
                                 .background(iconButtonContainer)
                                 .clickable { callbacks.onBack() },
                             contentAlignment = Alignment.Center
@@ -625,7 +626,7 @@ fun CandidateBar(
                         modifier = Modifier
                             .width(30.dp)
                             .height(24.dp)
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(CircleShape)
                             .background(
                                 if (isClearPressed) (if (visuals.isDarkTheme) Color.White.copy(alpha = 0.15f) else Color.Black.copy(
                                     alpha = 0.1f
@@ -655,7 +656,7 @@ fun CandidateBar(
                         modifier = Modifier
                             .width(30.dp)
                             .height(24.dp)
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(CircleShape)
                             .background(
                                 if (isMorePressed) (if (visuals.isDarkTheme) Color.White.copy(alpha = 0.15f) else Color.Black.copy(
                                     alpha = 0.1f
@@ -669,10 +670,11 @@ fun CandidateBar(
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "更多",
-                            color = if (isMorePressed) visuals.textColor.copy(alpha = 0.6f) else visuals.textColor,
-                            fontSize = 11.sp
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "更多候选",
+                            tint = if (isMorePressed) visuals.textColor.copy(alpha = 0.6f) else visuals.textColor,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
