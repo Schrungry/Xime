@@ -147,4 +147,118 @@ class UserDictIoManagerTest {
         // 正好等于上限：不算超限
         assertEquals(1024, bytes.size)
     }
+
+    // ---- 默认词库选择 ----
+
+    @Test
+    fun `pickDefaultDict prefers the dict referenced by current schema`() {
+        assertEquals(
+            "wubi86",
+            UserDictIoManager.pickDefaultDict(listOf("pinyin_simp", "t9_digit", "wubi86"), "wubi86")
+        )
+    }
+
+    @Test
+    fun `pickDefaultDict falls back to first when preferred has no user db yet`() {
+        // 方案引用的词典（如 cangjie5）还没打过字 ⇒ 没有对应 userdb，退回列表第一本
+        assertEquals(
+            "pinyin_simp",
+            UserDictIoManager.pickDefaultDict(listOf("pinyin_simp", "wubi86"), "cangjie5")
+        )
+    }
+
+    @Test
+    fun `pickDefaultDict falls back to first when no preferred given`() {
+        assertEquals(
+            "pinyin_simp",
+            UserDictIoManager.pickDefaultDict(listOf("pinyin_simp", "wubi86"), null)
+        )
+    }
+
+    @Test
+    fun `pickDefaultDict returns null for empty list`() {
+        assertNull(UserDictIoManager.pickDefaultDict(emptyList(), "wubi86"))
+    }
+
+    // ---- 单条增删：输入校验与码表行 ----
+
+    @Test
+    fun `checkEntryInput accepts word and code with default frequency`() {
+        val check = UserDictIoManager.checkEntryInput("劝学", "clip", "")
+
+        assertEquals(
+            UserDictIoManager.EntryInputCheck.Ok(
+                UserDictIoManager.EntryInput("劝学", "clip", UserDictIoManager.DEFAULT_COMMITS)
+            ),
+            check
+        )
+    }
+
+    @Test
+    fun `checkEntryInput trims word and code and keeps custom frequency`() {
+        val check = UserDictIoManager.checkEntryInput("  劝学 ", " clip ", " 7 ")
+
+        assertEquals(
+            UserDictIoManager.EntryInputCheck.Ok(
+                UserDictIoManager.EntryInput("劝学", "clip", 7)
+            ),
+            check
+        )
+    }
+
+    @Test
+    fun `checkEntryInput reports incomplete for blank word or code`() {
+        // 词/码为空 ⇒ Incomplete：弹层只把"确定"置灰，不弹红字
+        assertTrue(
+            UserDictIoManager.checkEntryInput("", "clip", "") is UserDictIoManager.EntryInputCheck.Incomplete
+        )
+        assertTrue(
+            UserDictIoManager.checkEntryInput("劝学", "   ", "") is UserDictIoManager.EntryInputCheck.Incomplete
+        )
+    }
+
+    @Test
+    fun `checkEntryInput rejects tabs and newlines that would break the row`() {
+        // 码表是「词 <TAB> 码 <TAB> 频率」，词/码里带制表符或换行会写坏整行
+        assertTrue(
+            UserDictIoManager.checkEntryInput("劝\t学", "clip", "") is UserDictIoManager.EntryInputCheck.Error
+        )
+        assertTrue(
+            UserDictIoManager.checkEntryInput("劝学\nx", "clip", "") is UserDictIoManager.EntryInputCheck.Error
+        )
+        assertTrue(
+            UserDictIoManager.checkEntryInput("劝学", "cl\tip", "") is UserDictIoManager.EntryInputCheck.Error
+        )
+    }
+
+    @Test
+    fun `checkEntryInput rejects non positive or non numeric frequency`() {
+        assertTrue(
+            UserDictIoManager.checkEntryInput("劝学", "clip", "0") is UserDictIoManager.EntryInputCheck.Error
+        )
+        assertTrue(
+            UserDictIoManager.checkEntryInput("劝学", "clip", "-3") is UserDictIoManager.EntryInputCheck.Error
+        )
+        assertTrue(
+            UserDictIoManager.checkEntryInput("劝学", "clip", "abc") is UserDictIoManager.EntryInputCheck.Error
+        )
+    }
+
+    @Test
+    fun `codeTableText builds one tab separated row`() {
+        assertEquals("劝学\tclip\t1\n", UserDictIoManager.codeTableText("劝学", "clip", 1))
+        // 删除 = 频率为负：librime 的 UserDbImporter::Put 见到负频率就标记删除（tombstone）
+        assertEquals(
+            "劝学\tclip\t-1\n",
+            UserDictIoManager.codeTableText("劝学", "clip", UserDictIoManager.DELETED_COMMITS)
+        )
+    }
+
+    @Test
+    fun `delete row passes the same import validation as a real code table`() {
+        // 单条删除也走「导入文本码表」那条通道 ⇒ 必须能过导入前的校验（含负频率）
+        val text = UserDictIoManager.codeTableText("劝学", "clip", UserDictIoManager.DELETED_COMMITS)
+
+        assertNull(UserDictIoManager.validateImportText(text))
+    }
 }
