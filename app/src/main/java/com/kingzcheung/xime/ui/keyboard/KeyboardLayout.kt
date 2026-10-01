@@ -138,8 +138,9 @@ fun KeyboardLayout(
         ?: if (uiState.isDarkTheme) longToColor(kbColors.keyTextColorDark) else longToColor(kbColors.keyTextColor)
     val specialKeyBackgroundColor = if (uiState.isDarkTheme) kbColors.specialKeyBgColorDark?.let { longToColor(it) }
         ?: themeSpecialKeyColor else kbColors.specialKeyBgColor?.let { longToColor(it) } ?: themeSpecialKeyColor
-    val specialKeyTextColor = if (uiState.isDarkTheme) Color.White
-        else KeyboardThemes.getSpecialKeyTextColor(uiState.themeId, false)
+    val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
+        specialKeyBackgroundColor, keyTextColor
+    )
     val bubbleBgColor = if (uiState.isDarkTheme) themeScheme.specialKeyDark
         else themeScheme.specialKeyLight
     val kbShadow = KeysConfigHelper.getKeyboardShadow()
@@ -1503,8 +1504,9 @@ private fun LandscapeKeyboardContent(
         ?: if (uiState.isDarkTheme) longToColor(kbColors.keyTextColorDark) else longToColor(kbColors.keyTextColor)
     val specialKeyBackgroundColor = if (uiState.isDarkTheme) kbColors.specialKeyBgColorDark?.let { longToColor(it) }
         ?: themeSpecialKeyColor else kbColors.specialKeyBgColor?.let { longToColor(it) } ?: themeSpecialKeyColor
-    val specialKeyTextColor = if (uiState.isDarkTheme) Color.White
-        else KeyboardThemes.getSpecialKeyTextColor(uiState.themeId, false)
+    val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
+        specialKeyBackgroundColor, keyTextColor
+    )
     val bubbleBgColor = if (uiState.isDarkTheme) themeScheme.specialKeyDark
         else themeScheme.specialKeyLight
     val kbShadow = KeysConfigHelper.getKeyboardShadow()

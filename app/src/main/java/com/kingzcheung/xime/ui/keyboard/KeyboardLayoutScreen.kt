@@ -63,8 +63,9 @@ fun KeyboardLayoutScreen(
         if (uiState.isDarkTheme) kbColors.specialKeyBgColorDark?.let { longToColor(it) }
             ?: themeSpecialKeyColor else kbColors.specialKeyBgColor?.let { longToColor(it) }
             ?: themeSpecialKeyColor
-    val specialKeyTextColor = if (uiState.isDarkTheme) Color.White
-    else KeyboardThemes.getSpecialKeyTextColor(uiState.themeId, false)
+    val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
+        specialKeyBgColor, keyTextColor
+    )
     val kbShadow = KeysConfigHelper.getKeyboardShadow()
     val kbKey = KeysConfigHelper.getKeyboardKeyConfig()
     val accentColor = KeyboardThemes.getAccentColor(uiState.themeId, uiState.isDarkTheme)
@@ -108,6 +109,7 @@ fun KeyboardLayoutScreen(
                     HandwritingLookupKeyboard(
                         keyTextColor = keyTextColor,
                         specialKeyBgColor = specialKeyBgColor,
+                        specialKeyTextColor = specialKeyTextColor,
                         keyboardBgColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
@@ -137,6 +139,7 @@ fun KeyboardLayoutScreen(
                     HandwritingLookupKeyboard(
                         keyTextColor = keyTextColor,
                         specialKeyBgColor = specialKeyBgColor,
+                        specialKeyTextColor = specialKeyTextColor,
                         keyboardBgColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
@@ -236,6 +239,7 @@ fun KeyboardLayoutScreen(
                     HandwritingLookupKeyboard(
                         keyTextColor = keyTextColor,
                         specialKeyBgColor = specialKeyBgColor,
+                        specialKeyTextColor = specialKeyTextColor,
                         keyboardBgColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
