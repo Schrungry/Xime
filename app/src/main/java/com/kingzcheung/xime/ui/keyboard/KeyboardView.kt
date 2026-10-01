@@ -84,6 +84,15 @@ import kotlin.math.roundToInt
 val LocalStretchFactor = compositionLocalOf { 1f }
 val LocalSuppressCursorMove = compositionLocalOf { mutableStateOf(false) }
 
+/**
+ * 父层光标手势是否已接管本次横向滑动。
+ *
+ * 父层激活光标手势后会 consume 横向位移（[KeyboardView] 内 activationThresholdPx），
+ * 按键层的拖拽累积随之停止增长，仍可能小于点击取消阈值，导致"光标已移动、按键又打出字"。
+ * 按键层据此放弃点击判定：横向滑动已被父层消费，就不该再算作点击。
+ */
+val LocalCursorGestureActive = compositionLocalOf { mutableStateOf(false) }
+
 @Composable
 fun KeyboardView(
     viewModel: KeyboardViewModel,
@@ -780,12 +789,14 @@ fun KeyboardView(
                     MainType.FULL -> {
                         val currentOnCursorMove = rememberUpdatedState(callbacks.onCursorMove)
                         val suppressCursorMove = remember { mutableStateOf(false) }
+                        val cursorGestureActive = remember { mutableStateOf(false) }
                         val cursorMod = if (callbacks.onCursorMove != null) {
                             Modifier.pointerInput(Unit) {
                                 val stepThresholdPx = 25.dp.toPx()
                                 val activationThresholdPx = 60.dp.toPx()
                                 awaitEachGesture {
                                     suppressCursorMove.value = false
+                                    cursorGestureActive.value = false
                                     val down = awaitFirstDown(requireUnconsumed = false)
                                     var isCursorGesture = false
                                     var lastSteps = 0
@@ -809,6 +820,7 @@ fun KeyboardView(
                                             if (!isCursorGesture && abs(dx) > activationThresholdPx) {
                                                 isCursorGesture = true
                                                 activationAnchorX = change.position.x
+                                                cursorGestureActive.value = true
                                             }
 
                                             if (isCursorGesture) {
@@ -996,6 +1008,7 @@ fun KeyboardView(
                         }
                         CompositionLocalProvider(
                             LocalSuppressCursorMove provides suppressCursorMove,
+                            LocalCursorGestureActive provides cursorGestureActive,
                         ) {
                             KeyboardLayoutScreen(
                                 keyboardState = keyboardState,

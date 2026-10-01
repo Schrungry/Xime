@@ -45,9 +45,6 @@ object SettingsPreferences {
     @JvmStatic
     var defaultDarkMode: Int = 2
     
-    const val KEY_SWIPE_UP_HINTS_ENABLED = "swipe_up_hints_enabled"
-    const val KEY_SWIPE_DOWN_HINTS_ENABLED = "swipe_down_hints_enabled"
-    const val KEY_SHOW_PRESS_BUBBLE = "show_press_bubble"
     const val KEY_LANDSCAPE_SPLIT_KEYBOARD_ENABLED = "landscape_split_keyboard_enabled"
     const val KEY_HARDWARE_KEYBOARD_DETECTION_ENABLED = "hardware_keyboard_detection_enabled"
 
@@ -528,30 +525,6 @@ object SettingsPreferences {
         getPrefs(context).edit().putString("plugin_net_pending_$pluginId", "").apply()
     }
     
-    fun isSwipeUpHintsEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_SWIPE_UP_HINTS_ENABLED, true)
-    }
-    
-    fun setSwipeUpHintsEnabled(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_SWIPE_UP_HINTS_ENABLED, enabled).apply()
-    }
-    
-    fun isSwipeDownHintsEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_SWIPE_DOWN_HINTS_ENABLED, true)
-    }
-
-    fun setSwipeDownHintsEnabled(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_SWIPE_DOWN_HINTS_ENABLED, enabled).apply()
-    }
-
-    fun shouldShowPressBubble(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_SHOW_PRESS_BUBBLE, true)
-    }
-
-    fun setShowPressBubble(context: Context, show: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_SHOW_PRESS_BUBBLE, show).apply()
-    }
-
     /** 横屏时是否使用分体键盘，默认关闭，由用户按需开启。 */
     fun isLandscapeSplitKeyboardEnabled(context: Context): Boolean {
         return getPrefs(context).getBoolean(KEY_LANDSCAPE_SPLIT_KEYBOARD_ENABLED, false)
