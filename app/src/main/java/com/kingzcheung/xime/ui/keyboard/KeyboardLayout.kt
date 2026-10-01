@@ -733,6 +733,11 @@ private fun PanelActionCell(
         backgroundColor = env.specialKeyBackgroundColor,
         iconColor = env.specialKeyTextColor,
         modifier = modifier,
+        a11yDescription = when (id) {
+            "symbol" -> "符号"
+            "emoji" -> "表情"
+            else -> "语音输入"
+        },
         onPress = { env.onKeyPressDown?.invoke(value) },
         onRelease = { env.onKeyRelease?.invoke(value) },
         shadowEnabled = env.shadowEnabled,
@@ -887,6 +892,7 @@ private fun DeleteCell(env: QwertyRowEnv, modifier: Modifier) {
         backgroundColor = env.specialKeyBackgroundColor,
         iconColor = env.specialKeyTextColor,
         modifier = modifier,
+        a11yDescription = "退格",
         swipeText = delRight.label.ifEmpty { "清空" },
         onSwipe = { invokeKeyAction(delRight, env.onKeyPress, env.onCommitText, env.onGestureAction) },
         onLongClick = { invokeKeyAction(delLong, env.onKeyPress, env.onCommitText, env.onGestureAction) },
@@ -1015,6 +1021,8 @@ private fun CommaCell(env: QwertyRowEnv, modifier: Modifier) {
             backgroundColor = env.keyBackgroundColor,
             iconColor = env.keyTextColor,
             modifier = modifier,
+            a11yDescription = "中英切换",
+            a11yState = if (env.isAsciiMode) "当前英文" else "当前中文",
             onPress = { env.onKeyPressDown?.invoke(k2TapValue) },
             onRelease = { env.onKeyRelease?.invoke(k2TapValue) },
             shadowEnabled = env.shadowEnabled,
@@ -1128,6 +1136,8 @@ private fun EarthCell(env: QwertyRowEnv, modifier: Modifier) {
             backgroundColor = env.keyBackgroundColor,
             iconColor = env.keyTextColor,
             modifier = modifier,
+            a11yDescription = "中英切换",
+            a11yState = if (env.isAsciiMode) "当前英文" else "当前中文",
             onPress = { env.onKeyPressDown?.invoke(k4TapValue) },
             onRelease = { env.onKeyRelease?.invoke(k4TapValue) },
             shadowEnabled = env.shadowEnabled,
@@ -1502,7 +1512,17 @@ private fun ShiftCapsKeyButton(
                 else if (shiftMode == ShiftMode.CAPS) darkenColor(backgroundColor, 0.2f)
                 else if (shiftMode == ShiftMode.SINGLE) darkenColor(backgroundColor, 0.1f)
                 else backgroundColor
-            ),
+            )
+            .keySemantics(
+                "大小写切换",
+                when (shiftMode) {
+                    ShiftMode.CAPS -> "大写锁定"
+                    ShiftMode.SINGLE -> "大写"
+                    ShiftMode.OFF -> "小写"
+                },
+            ) {
+                if (currentOnTap != null) currentOnTap?.invoke() else onKeyPress("shift_single")
+            },
         contentAlignment = Alignment.Center
     ) {
         val painter = when (shiftMode) {
@@ -2355,7 +2375,17 @@ private fun SpaceKey(
             .fillMaxHeight()
             .then(shadowModifier)
             .clip(RoundedCornerShape(LocalKeyCornerRadius.current))
-            .background(keyBackgroundColor),
+            .background(keyBackgroundColor)
+            .keySemantics(
+                when {
+                    voiceSticky -> "轻触结束语音"
+                    isVoiceMode -> "语音输入"
+                    else -> "空格"
+                },
+                null,
+            ) {
+                if (currentOnTap != null) currentOnTap?.invoke() else currentOnKeyPress("space")
+            },
         contentAlignment = Alignment.Center
     ) {
         when {

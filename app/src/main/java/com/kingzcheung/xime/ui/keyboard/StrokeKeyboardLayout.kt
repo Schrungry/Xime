@@ -586,6 +586,7 @@ private fun StrokeKeyboardContent(
                 backgroundColor = specialKeyBackgroundColor,
                 iconColor = specialKeyTextColor,
                 modifier = Modifier.weight(1f),
+                a11yDescription = "退格",
                 swipeText = if (compactMode) null else "清空",
                 onSwipe = { onKeyPress("clear_composition") },
                 onPress = { onKeyPressDown?.invoke("delete") },
