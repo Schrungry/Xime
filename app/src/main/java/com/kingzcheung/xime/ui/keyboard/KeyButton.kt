@@ -54,6 +54,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 
 /** 按键视觉缩进（padding），用于消除 spacedBy 死区。
  *  pointerInput 在 padding 之前，触摸区=全尺寸；
@@ -142,6 +148,24 @@ internal fun crispShadowColor(backgroundColor: Color): Color {
     }
 }
 
+/**
+ * TalkBack 无障碍语义层：合并子节点为单一可聚焦按键、Button 角色、双击激活走语义 onClick。
+ *
+ * 语义动作与组件内的 pointerInput 手势互不影响——明眼用户触摸路径零变化；
+ * TalkBack 双击执行 [tap]（绑定组件最新的 onClick）。语义配置只在组合期构建，
+ * 不进入渲染路径、不产生额外重组；[description]/[state] 缺省时靠子 Text 自然朗读。
+ */
+internal fun Modifier.keySemantics(
+    description: String?,
+    state: String?,
+    tap: () -> Unit,
+): Modifier = semantics(mergeDescendants = true) {
+    role = Role.Button
+    if (description != null) contentDescription = description
+    if (state != null) stateDescription = state
+    onClick { tap(); true }
+}
+
 @Composable
 fun KeyButton(
     text: String,
@@ -165,6 +189,10 @@ fun KeyButton(
     shadowEnabled: Boolean = true,
     shadowElevation: Dp = 1.dp,
     shadowShapeRadius: Dp = 8.dp,
+    /** TalkBack 朗读描述；缺省时靠键面 Text 朗读（字母/文本键无需传） */
+    a11yDescription: String? = null,
+    /** TalkBack 状态播报（如 Shift 的"大写锁定"） */
+    a11yState: String? = null,
 ) {
     var isPressed by remember { mutableStateOf(false) }
     var dragOffsetX by remember { mutableStateOf(0f) }
@@ -357,7 +385,8 @@ fun KeyButton(
                 if (isPressed) darkenColor(backgroundColor, 0.2f)
                 else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
                 else backgroundColor
-            ),
+            )
+            .keySemantics(a11yDescription, a11yState) { currentOnClick() },
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -435,6 +464,10 @@ fun SwipeableKeyButton(
     shadowEnabled: Boolean = true,
     shadowElevation: Dp = 1.dp,
     shadowShapeRadius: Dp = 8.dp,
+    /** TalkBack 朗读描述；缺省时靠键面 Text 朗读 */
+    a11yDescription: String? = null,
+    /** TalkBack 状态播报 */
+    a11yState: String? = null,
 ) {
     var isPressed by remember { mutableStateOf(false) }
     var dragOffsetY by remember { mutableStateOf(0f) }
@@ -745,7 +778,8 @@ fun SwipeableKeyButton(
                 if (isPressed) backgroundColor.copy(alpha = 0.7f)
                 else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
                 else backgroundColor
-            ),
+            )
+            .keySemantics(a11yDescription, a11yState) { currentOnClick() },
         contentAlignment = if (layoutMode == ButtonLayout.COMPACT) Alignment.TopStart else Alignment.Center
     ) {
         val contentScale = adaptiveKeyContentScale(maxHeight.value)
@@ -854,17 +888,21 @@ fun SwipeableKeyButton(
             val swipeHintCorner = LocalSwipeHintCorner.current
             if (!(swipeUpKeyLabel ?: swipeText).isNullOrEmpty() && (swipeUpKeyLabel ?: swipeText) != badgeText) {
                 val keyLabel = (swipeUpKeyLabel ?: swipeText)!!
-                val displayText = if (keyLabel.length <= 4) keyLabel else keyLabel.take(4)
+                // 含换行的多行键面提示（如双拼韵母助记 "ue\nve"）：完整按行渲染；
+                // 单行沿用 ≤4 字符截断，行为不变。角标模式的 1.sp 行高会把多行叠死，仅单行适用。
+                val hintLineCount = keyLabel.count { it == '\n' } + 1
+                val displayText = if (hintLineCount > 1) keyLabel
+                    else if (keyLabel.length <= 4) keyLabel else keyLabel.take(4)
                 Text(
                     text = displayText,
                     color = textColor.copy(alpha = 0.6f),
                     fontSize = effectiveSwipeFontSize,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
-                    maxLines = 1,
+                    maxLines = hintLineCount,
                     // 角标模式压掉默认行框：标签字体 metrics 的 ascent 大，不压行高字形会
                     // 沉在行框下半部，视觉上贴不到键顶（与下方 badge 的 1.sp 同款）
-                    lineHeight = if (swipeHintCorner) 1.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
+                    lineHeight = if (swipeHintCorner && hintLineCount == 1) 1.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
                     modifier = if (swipeHintCorner) Modifier
                         .align(Alignment.TopEnd)
                         .padding(top = 2.dp, end = 4.dp)
@@ -874,15 +912,18 @@ fun SwipeableKeyButton(
             }
 
             if (!swipeDownKeyLabel.isNullOrEmpty()) {
-                val displayText = if (swipeDownKeyLabel.length <= 4) swipeDownKeyLabel else swipeDownKeyLabel.take(4)
+                // 多行处理与上滑提示同款（含 \n 完整渲染，单行 ≤4 字符截断）
+                val hintLineCount = swipeDownKeyLabel.count { it == '\n' } + 1
+                val displayText = if (hintLineCount > 1) swipeDownKeyLabel
+                    else if (swipeDownKeyLabel.length <= 4) swipeDownKeyLabel else swipeDownKeyLabel.take(4)
                 Text(
                     text = displayText,
                     color = textColor.copy(alpha = 0.5f),
                     fontSize = effectiveSwipeFontSize,
                     fontWeight = FontWeight.Normal,
                     textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    lineHeight = if (swipeHintCorner) 1.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
+                    maxLines = hintLineCount,
+                    lineHeight = if (swipeHintCorner && hintLineCount == 1) 1.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
                     modifier = if (swipeHintCorner) Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 4.dp, bottom = 2.dp)
@@ -966,9 +1007,14 @@ fun IconKeyButton(
     shadowEnabled: Boolean = true,
     shadowElevation: Dp = 1.dp,
     shadowShapeRadius: Dp = 8.dp,
+    /** TalkBack 朗读描述（图标键必传，否则读屏读"未标记"） */
+    a11yDescription: String? = null,
+    /** TalkBack 状态播报 */
+    a11yState: String? = null,
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val density = LocalDensity.current
+    val currentOnClick by rememberUpdatedState(onClick)
 
     val shadowModifier = remember(shadowEnabled, shadowElevation, shadowShapeRadius, density, backgroundColor) {
         if (shadowEnabled) {
@@ -1023,7 +1069,8 @@ fun IconKeyButton(
                 if (isPressed) darkenColor(backgroundColor, 0.1f)
                 else if (isHighlighted) darkenColor(backgroundColor, 0.2f)
                 else backgroundColor
-            ),
+            )
+            .keySemantics(a11yDescription, a11yState) { currentOnClick() },
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -1073,6 +1120,10 @@ fun SwipeableIconKeyButton(
     shadowEnabled: Boolean = true,
     shadowElevation: Dp = 1.dp,
     shadowShapeRadius: Dp = 8.dp,
+    /** TalkBack 朗读描述（图标键必传，否则读屏读"未标记"） */
+    a11yDescription: String? = null,
+    /** TalkBack 状态播报 */
+    a11yState: String? = null,
 ) {
     var isPressed by remember { mutableStateOf(false) }
     var dragOffsetY by remember { mutableStateOf(0f) }
@@ -1355,7 +1406,8 @@ fun SwipeableIconKeyButton(
                 if (isPressed) darkenColor(backgroundColor, 0.2f)
                 else if (isHighlighted) backgroundColor.copy(alpha = 0.8f)
                 else backgroundColor
-            ),
+            )
+            .keySemantics(a11yDescription, a11yState) { currentOnClick() },
         contentAlignment = Alignment.Center
     ) {
         Icon(
