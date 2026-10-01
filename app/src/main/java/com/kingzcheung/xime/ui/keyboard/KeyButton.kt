@@ -191,6 +191,8 @@ fun KeyButton(
     // 与 KeyboardView 光标手势激活阈值（activationThresholdPx = 60dp）对齐，
     // 消除 30~60dp 位移区间"点击被取消但光标手势未激活"的死区（打字吃键）。
     val horizontalClickCancelThreshold = with(density) { 60.dp.toPx() }
+    // 父层光标手势已接管横向滑动时，本键不再判定点击（否则会"移动光标 + 打出一个字母"）
+    val cursorGestureActive = LocalCursorGestureActive.current
 
     val shadowModifier = remember(shadowEnabled, shadowElevation, shadowShapeRadius, density, backgroundColor) {
         if (shadowEnabled) {
@@ -237,7 +239,9 @@ fun KeyButton(
                             isSwipeDown = false
                         },
                         onDragEnd = {
-                            val shouldClick = !hasTriggeredSwipeUp && !hasTriggeredSwipeDown && abs(dragOffsetX) < horizontalClickCancelThreshold
+                            val shouldClick = !cursorGestureActive.value &&
+                            !hasTriggeredSwipeUp && !hasTriggeredSwipeDown &&
+                            abs(dragOffsetX) < horizontalClickCancelThreshold
                             if (shouldClick) {
                                 currentOnClick()
                             }
@@ -476,6 +480,8 @@ fun SwipeableKeyButton(
     // 横向接管阈值：低于父层光标手势激活阈值（60dp），使配置了左右滑的键优先接管横向滑动
     val horizontalSwipeSuppressThreshold = with(density) { 30.dp.toPx() }
     val suppressCursorMove = LocalSuppressCursorMove.current
+    // 父层光标手势已接管横向滑动时，本键不再判定点击（否则会"移动光标 + 打出一个字母"）
+    val cursorGestureActive = LocalCursorGestureActive.current
 
     val shadowModifier = remember(shadowEnabled, shadowElevation, shadowShapeRadius, density, backgroundColor) {
         if (shadowEnabled) {
@@ -516,7 +522,8 @@ fun SwipeableKeyButton(
                         isSwipeDown = false
                     },
                     onDragEnd = {
-                        val shouldClick = !hasTriggeredSwipeUp && !hasTriggeredSwipeDown &&
+                        val shouldClick = !cursorGestureActive.value &&
+                            !hasTriggeredSwipeUp && !hasTriggeredSwipeDown &&
                             !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight &&
                             abs(dragOffsetX) < horizontalClickCancelThreshold
                         if (shouldClick) {
@@ -582,7 +589,8 @@ fun SwipeableKeyButton(
                                 }
                                 
                                 // 上滑触发只看回调绑定，不依赖提示文本（swipeText 仅控制气泡/键面提示）：
-                                // 提示开关关闭或横屏紧凑不印提示时手势仍可用，与下滑触发语义一致。
+                                // 提示与手势相互独立，提示是否绘制由按键配置的 display/bubble 决定，
+                                // 手势只取决于回调是否绑定，与下滑触发语义一致。
                                 val onSwipeValue = currentOnSwipe
                                 if (dragOffsetY < swipeUpThreshold && !hasTriggeredSwipeUp && onSwipeValue != null) {
                                     hasTriggeredSwipeUp = true
@@ -1097,6 +1105,8 @@ fun SwipeableIconKeyButton(
     // 横向接管阈值：低于父层光标手势激活阈值（60dp），使配置了左右滑的键优先接管横向滑动
     val horizontalSwipeSuppressThreshold = with(density) { 30.dp.toPx() }
     val suppressCursorMove = LocalSuppressCursorMove.current
+    // 父层光标手势已接管横向滑动时，本键不再判定点击（否则会"移动光标 + 打出一个字母"）
+    val cursorGestureActive = LocalCursorGestureActive.current
     val bubbleShowThresholdUp = swipeUpThreshold
     val bubbleShowThresholdDown = swipeDownThreshold
     
@@ -1210,7 +1220,10 @@ fun SwipeableIconKeyButton(
                         } else if (dragOffsetY < swipeUpThreshold && !hasTriggeredSwipe && onSwipe != null) {
                             hasTriggeredSwipe = true
                             onSwipe()
-                        } else if (!hasTriggeredLongPress && !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight) {
+                        } else if (
+                            !cursorGestureActive.value && !hasTriggeredLongPress &&
+                            !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight
+                        ) {
                             currentOnClick()
                         }
                         dragActivated = false
