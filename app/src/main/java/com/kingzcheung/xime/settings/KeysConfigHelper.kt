@@ -367,6 +367,8 @@ data class ColorSchemeEntry(
     val keyBgColorDark: Long? = null,
     @SerialName("special_key_bg_color")
     val specialKeyBgColor: Long? = null,
+    @SerialName("special_key_bg_color_dark")
+    val specialKeyBgColorDark: Long? = null,
     @SerialName("candidate_bar_bg_color")
     val candidateBarBgColor: Long? = null,
     @SerialName("key_text_color")
@@ -1574,6 +1576,12 @@ object KeysConfigHelper {
     internal fun mergeStyleForTest(default: StyleConfig?, custom: StyleConfig?): StyleConfig? =
         mergeStyle(default, custom)
 
+    /** 仅供单元测试验证 color_schemes 合并逻辑。 */
+    internal fun mergeColorSchemesForTest(
+        default: Map<String, ColorSchemeEntry>?,
+        custom: Map<String, ColorSchemeEntry>?,
+    ): Map<String, ColorSchemeEntry>? = mergeColorSchemes(default, custom)
+
     private fun mergeColorSchemes(
         default: Map<String, ColorSchemeEntry>?,
         custom: Map<String, ColorSchemeEntry>?,
@@ -1595,6 +1603,7 @@ object KeysConfigHelper {
                 keyBgColor = customEntry.keyBgColor ?: base.keyBgColor,
                 keyBgColorDark = customEntry.keyBgColorDark ?: base.keyBgColorDark,
                 specialKeyBgColor = customEntry.specialKeyBgColor ?: base.specialKeyBgColor,
+                specialKeyBgColorDark = customEntry.specialKeyBgColorDark ?: base.specialKeyBgColorDark,
                 candidateBarBgColor = customEntry.candidateBarBgColor ?: base.candidateBarBgColor,
                 keyTextColor = customEntry.keyTextColor ?: base.keyTextColor,
                 keyTextColorDark = customEntry.keyTextColorDark ?: base.keyTextColorDark,

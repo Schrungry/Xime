@@ -337,8 +337,9 @@ private fun T9KeyboardContent(
     val t9DigitFontSize = if (compactMode) 13.sp else 16.sp
     val ctrlFontSize = if (compactMode) 11.sp else androidx.compose.ui.unit.TextUnit.Unspecified
     val candidateFontSize = if (compactMode) 11.sp else 13.sp
-    val specialKeyTextColor = if (uiState.isDarkTheme) Color.White
-        else KeyboardThemes.getAccentColor(uiState.themeId, false)
+    val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
+        specialKeyBackgroundColor, keyTextColor
+    )
 
     // 数字键滑动手势（keyboard.t9.keys，热重载经 configVersion 感知）：
     // 上滑默认直接上屏数字（T9 模式 onKeyPress(数字) 会进拼音数字码组合，须走 onCommitText），

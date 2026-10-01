@@ -222,8 +222,9 @@ fun KeyboardView(
     val specialKeyBgColor = if (state.isDarkTheme) kbColors.specialKeyBgColorDark?.let { longToColor(it) }
         ?: themeSpecialKeyColor
         else kbColors.specialKeyBgColor?.let { longToColor(it) } ?: themeSpecialKeyColor
-    val specialKeyTextColor = if (state.isDarkTheme) androidx.compose.ui.graphics.Color.White
-        else KeyboardThemes.getSpecialKeyTextColor(state.themeId, false)
+    val specialKeyTextColor = KeyboardThemes.getSpecialKeyTextColorForBackground(
+        specialKeyBgColor, keyTextColor
+    )
     val candidateTextColor = KeyboardThemes.getCandidateTextColorOverride(state.themeId, state.isDarkTheme)
         ?: if (state.isDarkTheme) longToColor(kbColors.candidateTextColorDark)
         else longToColor(kbColors.candidateTextColor)
