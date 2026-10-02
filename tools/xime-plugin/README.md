@@ -1,7 +1,7 @@
 # xipm — Xime 插件工具链
 
 Xime 输入法插件开发 CLI（Rust 实现）。负责 TypeScript 编译、xipk 打包、插件骨架生成与清单校验，
-以及**免真机单测**（`xipm test`，内嵌 QuickJS + mock host）与**真机热调试**（`xipm dev`/`xipm logs`，adb）。
+以及**免真机单测**（`xipm test`，内嵌 QuickJS + mock host）与**真机调试**（`xipm dev`/`xipm install`/`xipm logs`，adb）。
 
 - **插件源码**：TypeScript（`main.ts` + 可选 `libs/*.ts`，相对 import 自动内联）
 - **编译产物**：IIFE 单文件 `main.js`（无顶层 import/export，QuickJS 脚本模式直接执行）
@@ -19,7 +19,14 @@ cargo run -- --help
 cargo build --release
 ./target/release/xipm --help
 # 提示：若设置了 CARGO_TARGET_DIR，二进制位于 $CARGO_TARGET_DIR/release/xipm
+
+# 方式三：下载 Release 里的预编译二进制（每个平台一个包，文件名带 CLI 版本号）
+#   xipm-<version>-<target>.tar.gz（Windows 为 .zip），target 如 x86_64-unknown-linux-gnu
+xipm --version   # → xipm 0.1.1（版本号来自 tools/xime-plugin/Cargo.toml）
 ```
+
+CLI 版本号独立于 App 版本号（在 `tools/xime-plugin/Cargo.toml` 的 `[package] version`），
+发版时由 release workflow 读出来写进产物文件名。
 
 ## 最常用命令
 
