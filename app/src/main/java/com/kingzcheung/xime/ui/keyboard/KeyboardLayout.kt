@@ -411,6 +411,18 @@ fun KeyboardLayout(
  * - 其余动作（编辑/删除/回车/空格/清空/面板切换等）→ [onGestureAction]（UI 拦截层 → 服务层）
  * - NONE / null → 不触发
  */
+/**
+ * 九键数字键点按是否被用户**显式**改绑。
+ *
+ * [parseKeyAction] 会把 `tap` 缺省的 action 兜底为 [GestureAction.SEND_RIME] 且 value 为空，
+ * 因此「仅配置 label」的内置数字键（如 `"3": { tap: { label: "DEF" } }`）也会得到非 null 的
+ * action。这类配置不属于显式改绑，必须保持内置九键数字输入——否则点按会把键面字母（"DEF"
+ * 取首字符 'd'）送进 RIME，数字键退化为首字母简拼。
+ */
+internal fun t9DigitTapRebinds(tap: KeyAction?): Boolean =
+    tap != null && tap.action != null &&
+        (tap.action != GestureAction.SEND_RIME || tap.value.isNotEmpty())
+
 internal fun invokeKeyAction(
     action: KeyAction?,
     onKeyPress: (String) -> Unit,
