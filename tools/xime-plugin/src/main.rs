@@ -17,6 +17,9 @@ use clap::{Args, Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "xipm", version, about, long_about = None)]
 struct Cli {
+    /// 指定设备序列号（等价 `adb -s <SERIAL>`；多设备/无线调试时使用，可写在子命令前后）
+    #[arg(short = 's', long = "device", global = true, value_name = "SERIAL")]
+    device: Option<String>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -122,9 +125,6 @@ struct DevArgs {
     /// adb 可执行文件路径（缺省：$ADB / $ANDROID_HOME/platform-tools/adb / PATH）
     #[arg(long)]
     adb: Option<PathBuf>,
-    /// 指定设备序列号（adb -s；多设备/无线调试时使用）
-    #[arg(long)]
-    device: Option<String>,
     /// 不跟随设备日志（只做热更新循环）
     #[arg(long)]
     no_logs: bool,
@@ -143,9 +143,6 @@ struct LogsArgs {
     /// adb 可执行文件路径
     #[arg(long)]
     adb: Option<PathBuf>,
-    /// 指定设备序列号
-    #[arg(long)]
-    device: Option<String>,
     /// 读取历史错误（宿主 errors.jsonl，run-as；需要 debug 包）
     #[arg(long)]
     history: bool,
@@ -178,6 +175,8 @@ struct TestArgs {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    // 全局 -s/--device：dev 与 logs 共用（写在子命令前后均可）
+    let device = cli.device;
     match cli.command {
         Commands::Build(args) => run_build(args).await,
         Commands::Pack(args) => run_pack(args).await,
@@ -187,7 +186,7 @@ async fn main() -> anyhow::Result<()> {
             dir: args.dir,
             package: args.package,
             adb: args.adb,
-            device: args.device,
+            device: device.clone(),
             no_logs: args.no_logs,
             out: args.out,
         })
@@ -196,7 +195,7 @@ async fn main() -> anyhow::Result<()> {
             dir: args.dir,
             package: args.package,
             adb: args.adb,
-            device: args.device,
+            device: device.clone(),
             history: args.history,
             lines: args.lines,
             json: args.json,
@@ -489,4 +488,33 @@ fn run_init(args: InitArgs) -> anyhow::Result<()> {
     println!("✓ 已创建插件骨架 {}", target.display());
     println!("  下一步：xipm test .（与 xipm build --out dist");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 全局 `-s/--device`：子命令前后均可写（与 `adb -s` 一致），缺省为 None。
+    #[test]
+    fn device_flag_is_global_and_position_independent() {
+        let before = Cli::try_parse_from(["xipm", "-s", "SERIAL-1", "dev"]).unwrap();
+        assert_eq!(before.device.as_deref(), Some("SERIAL-1"));
+
+        let after = Cli::try_parse_from(["xipm", "dev", "-s", "SERIAL-2"]).unwrap();
+        assert_eq!(after.device.as_deref(), Some("SERIAL-2"));
+
+        let long = Cli::try_parse_from(["xipm", "logs", "--device", "SERIAL-3"]).unwrap();
+        assert_eq!(long.device.as_deref(), Some("SERIAL-3"));
+
+        let unset = Cli::try_parse_from(["xipm", "dev"]).unwrap();
+        assert_eq!(unset.device, None);
+    }
+
+    /// `-s` 是全局参数：非 adb 子命令也能解析（与 adb 的全局 `-s` 语义一致）。
+    #[test]
+    fn device_flag_is_accepted_by_other_subcommands() {
+        let cli = Cli::try_parse_from(["xipm", "-s", "SERIAL", "check"]).unwrap();
+        assert_eq!(cli.device.as_deref(), Some("SERIAL"));
+        assert!(matches!(cli.command, Commands::Check(_)));
+    }
 }

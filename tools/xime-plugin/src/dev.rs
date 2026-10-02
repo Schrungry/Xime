@@ -49,7 +49,7 @@ enum DevChannel {
 #[derive(Clone)]
 pub struct Adb {
     exe: PathBuf,
-    /// 目标设备序列号。`--device` 显式指定时保持不变；未指定时由 [Adb::ensure_device]
+    /// 目标设备序列号。`-s/--device` 显式指定时保持不变；未指定时由 [Adb::ensure_device]
     /// 从 `adb devices` 里挑出唯一的在线设备并**记住**（RefCell 使其在 `&self` 上就地解析）。
     serial: RefCell<Option<String>>,
 }
@@ -106,7 +106,7 @@ impl Adb {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
-    /// 设备在线检查；未显式指定 `--device` 时**自动采用唯一的在线设备**并固定下来。
+    /// 设备在线检查；未显式指定 `-s/--device` 时**自动采用唯一的在线设备**并固定下来。
     ///
     /// 不再直接依赖裸 `adb get-state`：无线调试（`adb-tls-connect`）下这个"默认设备"查询
     /// 经常返回空串，而且设备列表里只要残留一条 offline transport（重复 `adb connect` 的
@@ -130,7 +130,7 @@ impl Adb {
         Ok(())
     }
 
-    /// 解析 `adb devices`：唯一在线 → 采用；多台在线 → 列出序列号要求 `--device`；
+    /// 解析 `adb devices`：唯一在线 → 采用；多台在线 → 列出序列号要求 `-s/--device`；
     /// 无在线 → 给可操作提示（offline / unauthorized 分别说明怎么处理）。
     fn detect_single_online_device(&self) -> Result<String> {
         let out = self.run(&["devices"])?;
@@ -140,7 +140,7 @@ impl Adb {
         }
         if online.len() > 1 {
             anyhow::bail!(
-                "检测到多台在线设备：{}\n请用 --device <序列号> 指定（无线调试常见于 \
+                "检测到多台在线设备：{}\n请用 -s/--device <序列号> 指定（无线调试常见于 \
                  `adb connect` 与 mDNS 各注册一条同设备 transport）",
                 online.join(", ")
             );
@@ -201,7 +201,7 @@ impl Adb {
             if expect != 0 && actual != expect {
                 anyhow::bail!(
                     "插件包落地字节数不符（本地 {expect} / 设备 {actual} bytes）：\
-                     设备内部目录写入失败，请重试或改用 --device/重新插拔 adb"
+                     设备内部目录写入失败，请重试或改用 -s/--device 指定设备/重新插拔 adb"
                 );
             }
         }
