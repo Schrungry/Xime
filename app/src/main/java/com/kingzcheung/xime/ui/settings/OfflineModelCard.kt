@@ -42,9 +42,12 @@ import kotlinx.coroutines.withContext
  * 集成在语音转文本设置页内的离线模型状态卡片。
  * 模型由"模型中心"下载（filesDir/models/<id>/），本卡片展示安装状态，
  * 并提供已安装模型间的切换（切换即写偏好并卸载常驻引擎，下次语音生效）。
+ * 未安装模型时整卡可点跳转扩展商店的模型页（[onNavigateToDownload]）。
  */
 @Composable
-internal fun OfflineModelCard() {
+internal fun OfflineModelCard(
+    onNavigateToDownload: () -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val modelManager = remember { AsrModelManager(context) }
@@ -71,7 +74,13 @@ internal fun OfflineModelCard() {
     val switchable = models.count { modelManager.isModelInstalled(it.id) } > 1
 
     Card(
-        onClick = { if (switchable) showModelPicker = true },
+        onClick = {
+            when {
+                switchable -> showModelPicker = true
+                // 未安装：点击跳扩展商店下载（原来此处无反应，是张死卡片）
+                !downloaded -> onNavigateToDownload()
+            }
+        },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
@@ -145,17 +154,32 @@ internal fun OfflineModelCard() {
                     }
                 }
 
-                if (switchable) {
-                    Text(
-                        text = "切换",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                when {
+                    switchable -> {
+                        Text(
+                            text = "切换",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    // 未安装：右侧给出去下载入口，与整卡点击一致
+                    !downloaded -> {
+                        Text(
+                            text = "去下载",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
@@ -163,7 +187,7 @@ internal fun OfflineModelCard() {
                 text = if (downloaded)
                     "本地 Zipformer 流式识别，无网络也能用，识别在独立进程运行。"
                 else
-                    "尚未安装模型，请前往「扩展商店」下载「${model.name}」。",
+                    "尚未安装模型，点击前往「扩展商店」下载「${model.name}」。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
