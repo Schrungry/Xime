@@ -611,6 +611,8 @@ private fun T9KeyboardContent(
         val swipeRightHandler = swipeHandlerFor(binding?.swipeRight, commitDirect, onGestureAction)
         SwipeableKeyButton(
             text = label,
+            // tap.bubble: false → 不弹按压气泡（默认 true，行为与改动前一致）
+            pressText = label.takeIf { tap?.bubble ?: true },
             onClick = {
                 if (tap != null && tap.action != null) {
                     invokeKeyAction(tap, onKeyPress, callbacks.onCommitText, onGestureAction)
