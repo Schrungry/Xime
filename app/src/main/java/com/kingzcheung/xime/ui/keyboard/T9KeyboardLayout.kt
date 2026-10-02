@@ -531,9 +531,12 @@ private fun T9KeyboardContent(
     fun DigitKey(digit: String, modifier: Modifier) {
         val binding = KeysConfigHelper.getT9KeyGesture(digit)
         val tap = binding?.tap
-        // 只有配置了动作才改绑点按，否则保持内置的九键数字输入（维护 T9 组合/候选语义）
+        // 只有显式配置了动作才改绑点按，否则保持内置的九键数字输入（维护 T9 组合/候选语义）。
+        // 注意不能用 `tap.action != null` 判断：label-only 的内置配置会被解析器兜底为
+        // SEND_RIME（value 空），那种情况仍须走 onDigitPressed。
+        val tapRebinds = t9DigitTapRebinds(tap)
         val onDigitClick: () -> Unit = {
-            if (tap != null && tap.action != null) {
+            if (tapRebinds) {
                 invokeKeyAction(tap, onKeyPress, callbacks.onCommitText, onGestureAction)
             } else {
                 controller.onDigitPressed(digit)

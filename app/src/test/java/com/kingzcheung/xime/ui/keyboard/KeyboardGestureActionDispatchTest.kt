@@ -3,8 +3,10 @@ package com.kingzcheung.xime.ui.keyboard
 import com.kingzcheung.xime.keyboard.GestureAction
 import com.kingzcheung.xime.settings.KeyAction
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -204,5 +206,23 @@ class KeyboardGestureActionDispatchTest {
         val r = Recorder()
         dispatchLongPressSelection("孤", null, r.onKeyPress, r.onCommitText, r.onGestureAction)
         assertEquals(listOf("孤"), r.committed)
+    }
+
+    // ── 九键数字键点按改绑判定（t9DigitTapRebinds）──
+
+    @Test
+    fun `九键数字键仅配置 label 时不算改绑`() {
+        // 内置 "3": { tap: { label: "DEF" } } 被解析为 SEND_RIME + 空 value，
+        // 必须回退内置数字输入，否则点按把 'd' 当编码送进 RIME（beta7 回归）。
+        assertFalse(t9DigitTapRebinds(KeyAction(action = GestureAction.SEND_RIME, label = "DEF")))
+        assertFalse(t9DigitTapRebinds(null))
+        assertFalse(t9DigitTapRebinds(KeyAction(action = null, label = "DEF")))
+    }
+
+    @Test
+    fun `九键数字键显式配置动作或值时算改绑`() {
+        assertTrue(t9DigitTapRebinds(KeyAction(action = GestureAction.COMMIT, value = "，")))
+        assertTrue(t9DigitTapRebinds(KeyAction(action = GestureAction.COPY, label = "复制")))
+        assertTrue(t9DigitTapRebinds(KeyAction(action = GestureAction.SEND_RIME, value = "abc")))
     }
 }
