@@ -40,6 +40,11 @@ internal fun rememberImeKeyboardCallbacks(
                 service.keyRouter.handleKeyPress(key, isShifted)
             },
             onKeyPressDown = { key ->
+                // 删除键按下：开一次删除会话快照（下滑撤回删除用），必须在首次退格
+                // 派发之前（同一主线程回调内同步完成），否则首个被删字符漏记。
+                // 会话结算见 XimeInputMethodService.finishDeleteSession：由撤回请求或
+                // 其它按键触发，不在抬手上结算（抬手时退格 job 可能还在队列里没落盘）。
+                if (key == "delete") service.beginDeleteSession()
                 service.feedbackManager.performKeyPressDownEffect(key, view)
             },
             onKeyRelease = { key ->

@@ -179,6 +179,13 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         private const val HARDWARE_CANDIDATE_BAR_HEIGHT = 72
         internal const val SAFE_TEXT_LIMIT = 262144
 
+        /**
+         * 撤回快照 / 落点校验读取输入框的窗口（code unit，2026-10-02）。
+         * 足够覆盖单次删除会话（长按连删），避免按 [SAFE_TEXT_LIMIT] 整段读取时
+         * 每次手势都拷贝几百 KB 字符串。
+         */
+        internal const val UNDO_TEXT_WINDOW = 4096
+
         /** 面板 loading 延迟显示阈值：此时间内完成的动作不显示进度条（面板高度也不变，防闪烁）。 */
         private const val TOOL_PANEL_LOADING_SHOW_DELAY_MS = 250L
     }
@@ -268,7 +275,36 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     internal var voiceRecordingStarted = false
     private var pendingVoiceAction: (() -> Unit)? = null
     internal var composeViewRef: View? = null
+    /**
+     * 撤销槽：最近一次「上滑清空 / 删除」掉的内容，下滑撤回（undo_clear）时回插。
+     * 单槽语义 —— 后一次清空/删除会覆盖前一次（= 撤回最近一次操作）。
+     */
     internal var lastClearedText: String = ""
+    /**
+     * 撤销落点锚：删除会话入账（[finishDeleteSession]）时光标前的文本（窗口读取，
+     * 见 [UNDO_TEXT_WINDOW]）。下滑撤回前校验光标前文本未变，避免用户随后打过字 /
+     * 移过光标时把旧内容插到错误位置。
+     *
+     * null = 无锚（清空入账，或读不到输入框文本）→ 不做校验，保持改动前的撤回行为。
+     */
+    internal var lastUndoAnchorText: String? = null
+    /**
+     * 删除会话状态（下滑撤回删除，2026-10-02）。
+     *
+     * 长按连删以 30ms 频率重复派发（KeyButton 长按重复），逐次记账会在热路径上
+     * 引入 InputConnection 往返，故只在会话首尾各读一次光标前文本：
+     *   · [beginDeleteSession]（删除键按下 / 首次派发退格）：快照光标前文本 +
+     *     候选栏模式下的编码串；
+     *   · [finishDeleteSession]（下滑撤回请求 / 按了别的键）：两次读取之差即本次
+     *     删掉的内容，写入 [lastClearedText]，复用既有 undo_clear 回插通道。
+     *
+     * 结算**不挂在按键抬起**上：抬手时退格 job 可能仍在 keyJobs 队列里（还没落到
+     * 输入框），过早读取会少记内容并让落点锚失配。撤回请求与其它按键都排在退格 job
+     * 之后（同一 keyJobs FIFO），读到的是删干净之后的状态。
+     */
+    private var deleteSessionActive = false
+    private var deleteSessionBeforeText = ""
+    private var deleteSessionBeforeCode = ""
     /** 累积的 partial commit 段列表（多段选词场景下逐段追加，文本+拼音同源，供调频/回滚） */
     internal val t9PartialSegments = mutableListOf<T9PartialSegment>()
     /**
@@ -2728,6 +2764,68 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             }
         }
     }
+
+    // ── 删除会话撤回（下滑撤回删除，2026-10-02）────────────────────────
+    // 设计见 [deleteSessionActive] 字段注释：删除是 30ms 级热路径，只在会话首尾
+    // 各读一次输入框，靠两次快照之差还原"这次删掉了什么"，写入 lastClearedText，
+    // 由既有 undo_clear 分支回插，不改动撤回通道本身。
+
+    /** 编码串是否显示在输入框内（候选栏模式需单独记编码，输入框模式已含在文本差里）。 */
+    private fun isInputTextInInputBox(): Boolean =
+        SettingsPreferences.getInputTextLocation(this) == SettingsPreferences.INPUT_TEXT_INPUT_BOX
+
+    /** 读取光标前文本（受限窗口，见 [UNDO_TEXT_WINDOW]）。需主线程；读不到返回 null。 */
+    private fun readTextBeforeCursorWindowed(): String? = runCatching {
+        currentInputConnection?.getTextBeforeCursor(UNDO_TEXT_WINDOW, 0)?.toString()
+    }.getOrNull()
+
+    /**
+     * 删除会话开始：快照光标前文本与（候选栏模式下的）编码串。
+     * 会话进行中重复调用为空操作——长按连删只在按下时快照一次。
+     */
+    internal fun beginDeleteSession() {
+        // 会话快照读写 InputConnection 与 Compose 状态，必须在主线程（dispatchKey
+        // 等入口可能来自后台线程，这里兜底切主线程）。
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { beginDeleteSession() }
+            return
+        }
+        if (deleteSessionActive) return
+        val before = readTextBeforeCursorWindowed() ?: return
+        deleteSessionActive = true
+        deleteSessionBeforeText = before
+        deleteSessionBeforeCode = if (isInputTextInInputBox()) "" else candidateState.value.inputText
+    }
+
+    /**
+     * 删除会话结算：把本次删掉的内容登记为可撤回（写入 [lastClearedText]）。
+     *
+     * 被删内容 = 输入框前缀差 +（候选栏模式下）编码串前缀差：默认候选栏模式编码不在
+     * 输入框里，长按先吃编码再吃已上屏文本，两段都要记；INPUT_TEXT_INPUT_BOX 模式编码
+     * 就在输入框内，已包含在前缀差里，再拼会重复插入。
+     */
+    internal fun finishDeleteSession() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { finishDeleteSession() }
+            return
+        }
+        if (!deleteSessionActive) return
+        deleteSessionActive = false
+        val after = readTextBeforeCursorWindowed() ?: return
+        val afterCode = if (isInputTextInInputBox()) "" else candidateState.value.inputText
+        val removed = DeleteUndo.removedPrefix(deleteSessionBeforeText, after) +
+            DeleteUndo.removedPrefix(deleteSessionBeforeCode, afterCode)
+        if (removed.isEmpty()) return
+        lastClearedText = removed
+        lastUndoAnchorText = after
+    }
+
+    /**
+     * 撤回落点校验：光标前文本与入账时一致才允许回插（详见 [DeleteUndo.anchorMatches]）。
+     * 无锚（null）时放行。需主线程。
+     */
+    internal fun isUndoAnchorValid(): Boolean =
+        DeleteUndo.anchorMatches(lastUndoAnchorText, readTextBeforeCursorWindowed())
 
     /**
      * 删除光标前 count 个字符。
