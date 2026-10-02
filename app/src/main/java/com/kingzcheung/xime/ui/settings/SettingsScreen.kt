@@ -189,7 +189,8 @@ fun SettingsScreen(
                 onNavigateToPluginSettings = { pluginId ->
                     navController.navigate("${SettingsRoutes.PluginSettings}/$pluginId")
                 },
-                onNavigateToPlugins = { navController.navigate(SettingsRoutes.Plugins) }
+                onNavigateToPlugins = { navController.navigate(SettingsRoutes.Plugins) },
+                onNavigateToModelMarket = { navController.navigate(SettingsRoutes.MarketModel) }
             )
         }
         composable(SettingsRoutes.Dictionary) {
