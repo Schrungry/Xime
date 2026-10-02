@@ -692,6 +692,9 @@ private fun StrokeKeyItem(
 ) {
     SwipeableKeyButton(
         text = mainLabel,
+        // tap.bubble: false → 不弹按压气泡（默认 true，行为与改动前一致）；
+        // 笔画键的配置取自 keyboard.stroke.keys（键 id = 笔画键面字符）
+        pressText = mainLabel.takeIf { KeysConfigHelper.getStrokeKeyGesture(mainLabel)?.tap?.bubble ?: true },
         onClick = onClick,
         backgroundColor = backgroundColor,
         textColor = textColor,

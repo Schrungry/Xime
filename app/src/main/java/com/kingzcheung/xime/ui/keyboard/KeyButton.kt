@@ -440,6 +440,11 @@ fun SwipeableKeyButton(
     isHighlighted: Boolean = false,
     layoutMode: ButtonLayout = ButtonLayout.STANDARD,
     icon: Painter? = null,
+    /**
+     * 按下键帽气泡文本；null = 不弹按压气泡（键配置 `tap.bubble: false`）。
+     * 缺省跟随键面文本，与改动前行为一致。
+     */
+    pressText: String? = text,
     swipeText: String? = null,
     swipeDownText: String? = null,
     /** 下滑文本显示在按键上（气泡为空，用于 display:key） */
@@ -489,6 +494,7 @@ fun SwipeableKeyButton(
     val currentOnSwipeLeft by rememberUpdatedState(onSwipeLeft)
     val currentOnSwipeRight by rememberUpdatedState(onSwipeRight)
     val currentOnSwipeStateChange by rememberUpdatedState(onSwipeStateChange)
+    val currentPressText by rememberUpdatedState(pressText)
     val currentOnPress by rememberUpdatedState(onPress)
     val currentOnRelease by rememberUpdatedState(onRelease)
     val currentOnClick by rememberUpdatedState(onClick)
@@ -655,7 +661,7 @@ fun SwipeableKeyButton(
                     detectTapGestures(
                         onPress = {
                             isPressed = true
-                            currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentText), buttonBounds)
+                            currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
                             currentOnPress?.invoke()
                             val released = tryAwaitRelease()
                             if (released || !dragActivated) {
@@ -680,7 +686,7 @@ fun SwipeableKeyButton(
                     val items = currentLongPressItems ?: return@awaitEachGesture
                     
                     currentOnSwipeStateChange?.invoke(
-                        SwipeState(isPressed = true, pressedText = currentText), buttonBounds
+                        SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds
                     )
                     currentOnPress?.invoke()
                     

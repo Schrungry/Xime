@@ -932,6 +932,8 @@ private fun ModeChangeCell(env: QwertyRowEnv, modifier: Modifier) {
         ?: listOf("number", "common_symbol")
     SwipeableKeyButton(
         text = mcTap?.label?.takeIf { it.isNotEmpty() } ?: "?123",
+        // tap.bubble: false → 不弹按压气泡（默认 true，行为与改动前一致）
+        pressText = (mcTap?.label?.takeIf { it.isNotEmpty() } ?: "?123").takeIf { mcTap?.bubble ?: true },
         onClick = {
             if (mcTap != null) invokeKeyAction(mcTap, env.onKeyPress, env.onCommitText, env.onGestureAction)
             else env.onKeyPress("mode_change")
@@ -1045,6 +1047,8 @@ private fun CommaCell(env: QwertyRowEnv, modifier: Modifier) {
         SwipeableKeyButton(
             layoutMode = KeysConfigHelper.getButtonLayout(env.isAsciiMode),
             text = k2TapLabel,
+            // tap.bubble: false → 不弹按压气泡（默认 true，行为与改动前一致）
+            pressText = k2TapLabel.takeIf { k2KeyGesture?.tap?.bubble ?: true },
             onClick = k2OnClick,
             backgroundColor = env.keyBackgroundColor,
             textColor = env.keyTextColor,
@@ -1160,6 +1164,8 @@ private fun EarthCell(env: QwertyRowEnv, modifier: Modifier) {
         SwipeableKeyButton(
             layoutMode = KeysConfigHelper.getButtonLayout(env.isAsciiMode),
             text = k4TapLabel,
+            // tap.bubble: false → 不弹按压气泡（默认 true，行为与改动前一致）
+            pressText = k4TapLabel.takeIf { k4KeyGesture?.tap?.bubble ?: true },
             onClick = k4OnClick,
             backgroundColor = env.keyBackgroundColor,
             textColor = env.keyTextColor,
@@ -1407,6 +1413,8 @@ fun KeyboardRowWithConfig(
             SwipeableKeyButton(
                 layoutMode = KeysConfigHelper.getButtonLayout(isAsciiMode),
                 text = displayText,
+                // tap.bubble: false → 不弹按压气泡（默认 true，行为与改动前一致）
+                pressText = displayText.takeIf { tapAction?.bubble ?: true },
                 onClick = onClick,
                 backgroundColor = config.keyBackgroundColor,
                 textColor = config.keyTextColor,
@@ -1751,6 +1759,8 @@ fun SwipeableKeyButtonLandscape(
     backgroundColor: Color,
     textColor: Color,
     modifier: Modifier = Modifier,
+    /** 按下键帽气泡文本；null = 不弹按压气泡（键配置 `tap.bubble: false`）。缺省跟随键面文本。 */
+    pressText: String? = text,
     swipeText: String? = null,
     swipeDownText: String? = null,
     swipeUpKeyLabel: String? = null,
@@ -1796,6 +1806,7 @@ fun SwipeableKeyButtonLandscape(
     val currentOnLongPressSelect by rememberUpdatedState(onLongPressSelect)
     val currentLongPressItems by rememberUpdatedState(longPressItems)
     val currentOnSwipeStateChange by rememberUpdatedState(onSwipeStateChange)
+    val currentPressText by rememberUpdatedState(pressText)
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     val keyLabelFontFamily = AppFonts.keyLabelFontFamily
@@ -1848,7 +1859,7 @@ fun SwipeableKeyButtonLandscape(
                     detectTapGestures(
                         onPress = {
                             isPressed = true
-                            currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentText), buttonBounds)
+                            currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
                             currentOnPress?.invoke()
                             tryAwaitRelease()
                             isPressed = false
@@ -1868,7 +1879,7 @@ fun SwipeableKeyButtonLandscape(
                         val downX = down.position.x
                         val items = currentLongPressItems ?: return@awaitEachGesture
 
-                        currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentText), buttonBounds)
+                        currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
                         currentOnPress?.invoke()
 
                         val longPressJob = scope.launch {
@@ -1971,7 +1982,7 @@ fun SwipeableKeyButtonLandscape(
                                 hasTriggeredSwipeRight = false
                                 isSwiping = false
                                 isSwipeDown = false
-                                currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentText), buttonBounds)
+                                currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
                             },
                             onDragEnd = {
                                 if (!hasTriggeredSwipeUp && !hasTriggeredSwipeDown &&
@@ -2256,6 +2267,8 @@ fun CompactKeyboardRowWithConfig(
 
             SwipeableKeyButtonLandscape(
                 text = compactDisplayText,
+                // tap.bubble: false → 不弹按压气泡（默认 true，行为与改动前一致）
+                pressText = compactDisplayText.takeIf { compactTapAction?.bubble ?: true },
                 onClick = compactOnClick,
                 backgroundColor = config.keyBackgroundColor,
                 textColor = config.keyTextColor,

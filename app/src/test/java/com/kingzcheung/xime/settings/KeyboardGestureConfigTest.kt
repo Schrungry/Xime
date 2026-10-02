@@ -318,6 +318,30 @@ class KeyboardGestureConfigTest {
         KeysConfigHelper.setKeyGestureConfigForTest(emptyMap())
     }
 
+    // ── 按压气泡开关（tap.bubble，默认 true） ──
+
+    @Test
+    fun `tap 的 bubble 默认开启`() {
+        assertTrue(parse("q: { tap: \"q\" }")["q"]!!.tap!!.bubble)
+        assertTrue(parse("q: { tap: { value: \"q\", label: \"q\" } }")["q"]!!.tap!!.bubble)
+    }
+
+    @Test
+    fun `tap 的 bubble 可关闭且不影响其它字段`() {
+        val tap = parse("q: { tap: { label: \"q\", value: \"q\", bubble: false } }")["q"]!!.tap!!
+        assertFalse(tap.bubble)
+        assertEquals("q", tap.label)
+        assertEquals("q", tap.value)
+        assertEquals(GestureAction.SEND_RIME, tap.action)
+    }
+
+    @Test
+    fun `tap 与 swipe 的气泡开关互相独立`() {
+        val binding = parse("q: { tap: { value: \"q\", bubble: false }, swipe_up: { value: \"1\", bubble: true } }")["q"]!!
+        assertFalse(binding.tap!!.bubble)
+        assertTrue(binding.swipeUp!!.bubble)
+    }
+
     // ── 辅助 ──
 
     private fun parse(
