@@ -39,6 +39,9 @@ xipm dev plugins/my-plugin
 # 多设备/无线调试：-s 指定设备序列号（等价 adb -s，全局参数，子命令前后都可写）
 xipm -s 192.168.1.10:5555 dev plugins/my-plugin
 
+# 真机安装：把 xipk（或插件目录，先编译打包）装到手机
+xipm install build/plugin-release/my-plugin-0.1.0.xipk
+
 # 真机插件日志（实时跟随；--history 拉取历史错误）
 xipm logs plugins/my-plugin --history
 ```
@@ -75,7 +78,7 @@ cargo run -- pack /tmp/demo/my-plugin --out /tmp/demo/out --release-dir /tmp/dem
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
-| `-s, --device <SERIAL>` | 指定设备序列号（等价 `adb -s`；`dev`/`logs` 使用） | 自动采用唯一在线设备 |
+| `-s, --device <SERIAL>` | 指定设备序列号（等价 `adb -s`；`dev`/`install`/`logs` 使用） | 自动采用唯一在线设备 |
 
 ```bash
 xipm -s <serial> dev          # 与 adb -s 一致（写在子命令前）
@@ -209,6 +212,29 @@ xipm dev -s <serial> --no-logs                # 多设备/无线调试；只热�
      logcat，显示 `✓ 热安装成功` / `✗ 热安装失败：<原因>`；10s 无回执提示检查宿主）
   2. release 通道：CLI 轮询 `logcat -d -s XipmDev` 解析 `INSTALL_OK` / `INSTALL_FAIL`；
      错误落盘跟随与 `xipm logs --history` 在此通道不可用
+
+### `xipm install [XIPK|DIR]`
+
+把插件热安装到手机（与 `xipm dev` 同一热安装通道，但不 watch、不跟日志）：
+
+```bash
+xipm install build/plugin-release/volc-asr-3.0.1.xipk   # 安装现成 xipk
+xipm install plugins/volc-asr                          # 插件目录：先编译打包再安装
+xipm -s <serial> install plugins/volc-asr              # 多设备：全局 -s 指定设备
+```
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--package` | 应用包名 | `com.kingzcheung.xime` |
+| `--adb` | adb 路径（同 `xipm dev`） | - |
+
+- 目标缺省为当前目录；是**插件目录**时按 `xipm pack` 的默认布局先编译打包
+  （`build/plugin-js/` → `build/plugin-release/<name>-<version>.xipk`）再安装，
+  是 `.xipk` 文件时直接安装
+- 通道自动探测（同 `xipm dev`）：debug 包走 `run-as` 内部目录 + jsonl 回执；
+  release 包走 `/data/local/tmp` + logcat 回执，且需在宿主开启"插件开发模式"
+- 安装后等待设备回执（最长 10s）：`✓ 热安装成功：<插件 id> <信息>` /
+  `✗ 热安装失败：<原因>`；未收到回执时给出排查提示（同 `xipm dev`）
 
 ### `xipm logs [DIR]`
 
