@@ -33,13 +33,22 @@ const COMPAT_DEV_DIR: &str = "/data/local/tmp/xipm-dev";
 /// `am start` 由 shell 特权发起，不受应用后台执行限制；开发模式开关门禁）。
 const INSTALL_ACTIVITY_SUFFIX: &str = "plugin.DevPluginInstallActivity";
 
-/// dev 推送/回执通道（run_dev 开头按 run-as 可用性自动探测）。
+/// 推送/回执通道（`xipm dev` / `xipm install` 按 run-as 可用性自动探测）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DevChannel {
+pub enum DevChannel {
     /// debug 包：run-as 内部目录 + jsonl 回执 + 错误落盘跟随（原全链路）
     Debug,
     /// release 包：/data/local/tmp 推送 + logcat(XipmDev) 回执；无错误落盘跟随
     ReleaseCompat,
+}
+
+/// 探测热安装通道：`run-as` 仅对 debuggable 包有效，release 包自动走兼容通道。
+pub fn detect_channel(adb: &Adb, package: &str) -> DevChannel {
+    if adb.run_as(package, &["true"]).is_ok() {
+        DevChannel::Debug
+    } else {
+        DevChannel::ReleaseCompat
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -49,7 +58,7 @@ enum DevChannel {
 #[derive(Clone)]
 pub struct Adb {
     exe: PathBuf,
-    /// 目标设备序列号。`--device` 显式指定时保持不变；未指定时由 [Adb::ensure_device]
+    /// 目标设备序列号。`-s/--device` 显式指定时保持不变；未指定时由 [Adb::ensure_device]
     /// 从 `adb devices` 里挑出唯一的在线设备并**记住**（RefCell 使其在 `&self` 上就地解析）。
     serial: RefCell<Option<String>>,
 }
@@ -82,6 +91,11 @@ impl Adb {
         self
     }
 
+    /// 当前目标设备序列号（[Adb::ensure_device] 之后必定有值）。
+    pub fn serial(&self) -> Option<String> {
+        self.serial.borrow().clone()
+    }
+
     fn cmd(&self) -> Command {
         let mut cmd = Command::new(&self.exe);
         if let Some(s) = self.serial.borrow().as_ref() {
@@ -106,7 +120,7 @@ impl Adb {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
-    /// 设备在线检查；未显式指定 `--device` 时**自动采用唯一的在线设备**并固定下来。
+    /// 设备在线检查；未显式指定 `-s/--device` 时**自动采用唯一的在线设备**并固定下来。
     ///
     /// 不再直接依赖裸 `adb get-state`：无线调试（`adb-tls-connect`）下这个"默认设备"查询
     /// 经常返回空串，而且设备列表里只要残留一条 offline transport（重复 `adb connect` 的
@@ -130,7 +144,7 @@ impl Adb {
         Ok(())
     }
 
-    /// 解析 `adb devices`：唯一在线 → 采用；多台在线 → 列出序列号要求 `--device`；
+    /// 解析 `adb devices`：唯一在线 → 采用；多台在线 → 列出序列号要求 `-s/--device`；
     /// 无在线 → 给可操作提示（offline / unauthorized 分别说明怎么处理）。
     fn detect_single_online_device(&self) -> Result<String> {
         let out = self.run(&["devices"])?;
@@ -140,7 +154,7 @@ impl Adb {
         }
         if online.len() > 1 {
             anyhow::bail!(
-                "检测到多台在线设备：{}\n请用 --device <序列号> 指定（无线调试常见于 \
+                "检测到多台在线设备：{}\n请用 -s/--device <序列号> 指定（无线调试常见于 \
                  `adb connect` 与 mDNS 各注册一条同设备 transport）",
                 online.join(", ")
             );
@@ -201,7 +215,7 @@ impl Adb {
             if expect != 0 && actual != expect {
                 anyhow::bail!(
                     "插件包落地字节数不符（本地 {expect} / 设备 {actual} bytes）：\
-                     设备内部目录写入失败，请重试或改用 --device/重新插拔 adb"
+                     设备内部目录写入失败，请重试或改用 -s/--device 指定设备/重新插拔 adb"
                 );
             }
         }
@@ -369,11 +383,7 @@ pub async fn run_dev(args: DevArgs) -> Result<()> {
     adb.ensure_device()?;
 
     // 通道探测：run-as 仅对 debuggable 包有效；release 包自动走兼容通道
-    let channel = if adb.run_as(&args.package, &["true"]).is_ok() {
-        DevChannel::Debug
-    } else {
-        DevChannel::ReleaseCompat
-    };
+    let channel = detect_channel(&adb, &args.package);
     match channel {
         DevChannel::Debug => {
             adb.shell(&["run-as", &args.package, "mkdir", "-p", &format!("files/{DEV_DIR}")])?;
@@ -442,7 +452,7 @@ pub async fn run_dev(args: DevArgs) -> Result<()> {
     Ok(())
 }
 
-/// 编译 → 打包 → 按通道推送 → am start 热安装 → 等待回执（debug=jsonl / release=logcat）。
+/// 编译 → 打包 → 热安装（[install_xipk]）。
 /// （dev 用未压缩产物，便于真机排查）
 async fn deploy(
     dir: &Path,
@@ -458,14 +468,40 @@ async fn deploy(
         &outcome.manifest,
         &out_root.join("dist"),
     )?;
+    install_xipk(
+        adb,
+        package,
+        channel,
+        &xipk,
+        &format!("{plugin_name}.xipk"),
+        &outcome.manifest.id,
+        &dir.display().to_string(),
+    )
+    .await
+}
+
+/// 推送 xipk → `am start` 热安装 → 等待设备回执（最长 10s）。
+///
+/// - `remote_name`：设备上的文件名（宿主只认 `path` extra，文件名无协议含义）
+/// - `label`：展示用的插件标识（回执未带插件 id 时的兜底）
+/// - `log_hint`：超时提示里 `xipm logs <log_hint>` 的取值（插件目录）
+pub async fn install_xipk(
+    adb: &Adb,
+    package: &str,
+    channel: DevChannel,
+    xipk: &Path,
+    remote_name: &str,
+    label: &str,
+    log_hint: &str,
+) -> Result<()> {
     let fetch = |adb: &Adb, package: &str| match channel {
         DevChannel::Debug => fetch_results(adb, package),
         DevChannel::ReleaseCompat => fetch_results_compat(adb),
     };
     let before = fetch(adb, package).map(|v| v.len()).unwrap_or(0);
     let remote_path = match channel {
-        DevChannel::Debug => adb.push_to_internal(package, &format!("{plugin_name}.xipk"), &xipk)?,
-        DevChannel::ReleaseCompat => adb.push_compat(&format!("{plugin_name}.xipk"), &xipk)?,
+        DevChannel::Debug => adb.push_to_internal(package, remote_name, xipk)?,
+        DevChannel::ReleaseCompat => adb.push_compat(remote_name, xipk)?,
     };
     adb.start_install(package, &remote_path)?;
 
@@ -486,7 +522,7 @@ async fn deploy(
                         println!(
                             "  {} 热安装成功：{} {}",
                             color::green("✓"),
-                            done.p.clone().unwrap_or_else(|| outcome.manifest.id.clone()),
+                            done.p.clone().unwrap_or_else(|| label.to_string()),
                             done.m
                         );
                     } else {
@@ -500,16 +536,14 @@ async fn deploy(
             if channel == DevChannel::ReleaseCompat {
                 println!(
                     "  {} 未收到设备回执（10s）：请确认已开启\"插件开发模式\"\
-                     （设置 → 关于 → 连点设备信息 7 次解锁），或用 `xipm logs {}` 查看设备日志",
-                    color::yellow("!"),
-                    dir.display()
+                     （设置 → 关于 → 连点设备信息 7 次解锁），或用 `xipm logs {log_hint}` 查看设备日志",
+                    color::yellow("!")
                 );
             } else {
                 println!(
                     "  {} 未收到设备回执（10s）：请确认宿主为最新 debug 包（./gradlew installDebug），\
-                     或用 `xipm logs {}` 查看设备日志",
-                    color::yellow("!"),
-                    dir.display()
+                     或用 `xipm logs {log_hint}` 查看设备日志",
+                    color::yellow("!")
                 );
             }
             return Ok(());
