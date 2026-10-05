@@ -58,8 +58,17 @@ if(IS_SYMLINK "${T9_PLUGIN_LINK}")
 elseif(EXISTS "${T9_PLUGIN_LINK}")
   file(REMOVE_RECURSE "${T9_PLUGIN_LINK}")
 endif()
-file(CREATE_LINK "../../librime-t9"
+set(T9_PLUGIN_TARGET "../../librime-t9")
+if(CMAKE_HOST_WIN32)
+  # Windows 根据目标是否为目录决定链接类型，必须使用可解析的绝对路径。
+  set(T9_PLUGIN_TARGET "${CMAKE_SOURCE_DIR}/librime-t9")
+endif()
+file(CREATE_LINK "${T9_PLUGIN_TARGET}"
      "${T9_PLUGIN_LINK}" SYMBOLIC)
+if(NOT IS_DIRECTORY "${T9_PLUGIN_LINK}" OR
+   NOT EXISTS "${T9_PLUGIN_LINK}/CMakeLists.txt")
+  message(FATAL_ERROR "T9 plugin directory link is invalid: ${T9_PLUGIN_LINK}")
+endif()
 
 # librime-lua 需要特殊命名 lua
 file(COPY "${CMAKE_SOURCE_DIR}/librime-lua/"

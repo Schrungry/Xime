@@ -364,13 +364,18 @@ val downloadKnf by tasks.registering {
 val syncT9Plugin by tasks.registering {
     val authoritative = file("src/main/jni/librime-t9")
     val mirror = file("src/main/jni/librime/plugins/librime-t9")
-    val expectedTarget = Paths.get("../../librime-t9")
+    val expectedTarget = if (System.getProperty("os.name").startsWith("Windows")) {
+        authoritative.toPath()
+    } else {
+        Paths.get("../../librime-t9")
+    }
     inputs.dir(authoritative)
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .optional(true)
     doLast {
         val link = mirror.toPath()
-        if (Files.isSymbolicLink(link) && Files.readSymbolicLink(link) == expectedTarget) {
+        if (Files.isSymbolicLink(link) && Files.readSymbolicLink(link) == expectedTarget &&
+            Files.isDirectory(link)) {
             return@doLast
         }
         if (Files.isSymbolicLink(link)) {
@@ -388,6 +393,9 @@ val syncT9Plugin by tasks.registering {
 //    改动（尤其 librime/src 核心改动）不会进 APK。
 //    声明后：源码一变任务必然执行，ninja 按依赖增量重编，仍然很快。
 tasks.configureEach {
+    if (name.startsWith("configureCMake")) {
+        dependsOn(syncT9Plugin)
+    }
     if (name.startsWith("buildCMake")) {
         dependsOn(syncT9Plugin)
         inputs.dir("src/main/jni/librime/src")
