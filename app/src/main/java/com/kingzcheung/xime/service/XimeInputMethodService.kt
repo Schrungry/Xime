@@ -2018,10 +2018,12 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         t9PartialSegments.clear()
         debugLog("onStartInput: cleared lastCommittedText")
 
-        // 跨进程同步文件日志开关（开关在主进程设置页切换）
-        FileLogger.setVerboseLoggingEnabled(
-            SettingsPreferences.isVerboseLoggingEnabled(this)
-        )
+        // 跨进程同步文件日志开关（开关在主进程设置页切换）。
+        // 同步到 native：控制 rime JNI 的按键/候选 logcat 日志（tag XimeRime），
+        // postRimeJob 在 key-processing 线程执行，避免主线程等 rimeLock。
+        val verboseLogging = SettingsPreferences.isVerboseLoggingEnabled(this)
+        FileLogger.setVerboseLoggingEnabled(verboseLogging)
+        keyRouter.postRimeJob { rimeEngine.setVerboseLogging(verboseLogging) }
         
         if (RimeEngine.isInitialized()) {
             // 部署/全量编译进行中：不执行 schema 切换（switchSchema 会等待 rimeLock，
