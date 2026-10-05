@@ -1636,6 +1636,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                                     toolbarPluginButtons = state.toolbarPluginButtons,
                                     isCalculatorMode = calculatorEngine.isActive(),
                                     inputSessionId = state.inputSessionId,
+                                    isInputSessionRestarting = state.isInputSessionRestarting,
                                     isFloatingMode = state.isFloatingMode,
                                     isHandwritingMode = isHandwritingMode,
                                     floatingOffsetX = state.floatingOffsetX,
@@ -2106,6 +2107,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
 
         uiState.value = uiState.value.copy(
             inputSessionId = System.nanoTime(),
+            isInputSessionRestarting = restarting,
             isSttEnabled = SettingsPreferences.isSttEnabled(this@XimeInputMethodService),
         )
 
