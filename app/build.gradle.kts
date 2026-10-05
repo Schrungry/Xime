@@ -246,6 +246,7 @@ dependencies {
     // Ktor embedded server for wireless import
     implementation("io.ktor:ktor-server-core:3.6.0")
     implementation("io.ktor:ktor-server-cio:3.6.0")
+    implementation("io.ktor:ktor-io-jvm:3.6.0")
     implementation(libs.kotlinx.serialization.json)
 
     // Room 3.0 (SQLite)
