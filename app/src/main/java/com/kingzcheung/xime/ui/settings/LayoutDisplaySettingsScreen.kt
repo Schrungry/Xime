@@ -272,7 +272,14 @@ fun LayoutDisplaySettingsContent(
                     )
 
                     val pageSizePref = SettingsPreferences.getPageSize(context)
-                    val effectiveValue = if (pageSizePref == 0) 20f else pageSizePref.toFloat()
+                    val effectiveValue = (if (pageSizePref == 0) {
+                        SettingsPreferences.DEFAULT_PAGE_SIZE
+                    } else {
+                        pageSizePref
+                    }).coerceIn(
+                        SettingsPreferences.MIN_PAGE_SIZE,
+                        SettingsPreferences.MAX_PAGE_SIZE
+                    ).toFloat()
                     var pageSizeSlider by remember(effectiveValue) {
                         mutableStateOf(effectiveValue)
                     }
@@ -302,10 +309,17 @@ fun LayoutDisplaySettingsContent(
                             onValueChange = { pageSizeSlider = it },
                             onValueChangeFinished = {
                                 val intValue = pageSizeSlider.toInt()
-                                SettingsPreferences.setPageSize(context, intValue)
+                                SettingsPreferences.setPageSize(
+                                    context,
+                                    intValue.coerceIn(
+                                        SettingsPreferences.MIN_PAGE_SIZE,
+                                        SettingsPreferences.MAX_PAGE_SIZE
+                                    )
+                                )
                             },
-                            valueRange = 20f..50f,
-                            steps = 29
+                            valueRange = SettingsPreferences.MIN_PAGE_SIZE.toFloat()..SettingsPreferences.MAX_PAGE_SIZE.toFloat(),
+                            steps = SettingsPreferences.MAX_PAGE_SIZE -
+                                SettingsPreferences.MIN_PAGE_SIZE - 1
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(

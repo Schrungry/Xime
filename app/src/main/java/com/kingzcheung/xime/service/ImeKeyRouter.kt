@@ -25,6 +25,21 @@ import kotlinx.coroutines.withContext
  */
 internal class ImeKeyRouter(private val service: XimeInputMethodService) {
 
+    private fun processKeyAtEditingCaret(keyCode: Int, mask: Int): com.kingzcheung.xime.rime.RimeProcessResult {
+        val caret = service.editingCaretPos
+        val input = if (caret >= 0) service.rimeEngine.getInput() else ""
+        val editing = !service.uiState.value.isAsciiMode &&
+            !isT9Schema(service.uiState.value.currentSchemaId) &&
+            caret in 0 until input.length && service.editingCaretInput == input
+        val result = service.rimeEngine.processKeyAndGetResult(keyCode, mask, if (editing) caret else -1)
+        if (editing && result.processed) {
+            val nextCaret = result.caretPos.takeIf { it in 0 until result.inputText.length } ?: -1
+            service.editingCaretPos = nextCaret
+            service.editingCaretInput = if (nextCaret >= 0) result.inputText else ""
+        }
+        return result
+    }
+
     /**
      * 候选词变换（hotPath 插件能力）+ 发送 UI 更新。
      * 必须在 key-processing 线程调用：同步等插件至多 15ms；
@@ -45,7 +60,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
     }
 
     internal fun handleKeyPress(key: String, isShifted: Boolean) {
-        // 空键无任何按键语义，且下游 Rime 路由按 key[0] 取码（key.lowercase()[0]），
+        // 空键无任何按键语义，且下游 Rime 路由按 key[0] 取码，
         // 空串会越界崩溃（2026-09-14 真机实证：滑动手势 commit 值为空时触发）。
         if (key.isEmpty()) return
         if (service.uiState.value.toolPanelInputFocused) {
@@ -81,12 +96,13 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                 "delete" -> {
                     if (hasComposing) {
                         // 组合态：退格走 Rime，更新候选栏
-                        service.rimeEngine.processKey(0xff08, 0)
-                        val result = service.rimeEngine.getProcessResult(true)
-                        if (result.inputText.isEmpty()) {
-                            service.rimeEngine.clearComposition()
+                        postRimeJob {
+                            val result = processKeyAtEditingCaret(0xff08, 0)
+                            if (result.inputText.isEmpty()) {
+                                service.rimeEngine.clearComposition()
+                            }
+                            sendTransformedResult(result)
                         }
-                        sendTransformedResult(result)
                     } else {
                         ToolPanelEditTextHolder.editText?.let { et ->
                             val start = et.selectionStart.coerceAtLeast(0)
@@ -119,12 +135,23 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                     if (key.length == 1) {
                         val isLetter = key.matches(Regex("[a-zA-Z]"))
                         val isChineseMode = !service.uiState.value.isAsciiMode
-                        if (isLetter && isChineseMode) {
-                            // 中文模式：字母进 Rime 拼音组合，候选栏选词后经 commitText 重定向进面板输入框
-                            val keyCode = key.lowercase()[0].code
-                            val result = service.rimeEngine.processKeyAndGetResult(keyCode, 0)
-                            if (result.processed) {
-                                sendTransformedResult(result)
+                        val isRimeDigit = key[0] in '0'..'9' &&
+                            service.keyboardViewModel.keyboardState.value !is KeyboardLayoutState.Number &&
+                            service.keyboardViewModel.keyboardState.value !is KeyboardLayoutState.CommonSymbol
+                        if (isChineseMode && (isLetter || isRimeDigit)) {
+                            // 面板内的字母、数字同样交给方案处理，提交文本经 commitText 重定向。
+                            val char = if (isShifted && isLetter) key.uppercase() else key
+                            val mask = if (isShifted && isLetter) KeyEvent.META_SHIFT_ON else 0
+                            postRimeJob {
+                                val result = processKeyAtEditingCaret(char[0].code, mask)
+                                if (result.processed) {
+                                    if (result.committedText.isNotEmpty()) {
+                                        withContext(Dispatchers.Main) { service.commitText(result.committedText) }
+                                    }
+                                    sendTransformedResult(result)
+                                } else {
+                                    withContext(Dispatchers.Main) { service.commitText(char) }
+                                }
                             }
                             return
                         }
@@ -477,8 +504,6 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                         return@launch
                     }
 
-                    val pendingEnglish = candState.pendingEnglishText
-                    
                     // 非计算器键清除计算器状态
                     if (!key.matches(Regex("[0-9]")) && key !in listOf("+", "-", "*", "/", ".")) {
                         if (service.calculatorEngine.isActive() || service.calculatorEngine.getCandidate() != null) {
@@ -497,26 +522,13 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                         updateCalculatorCandidates()
                     }
                     
-                    // 数字选词拦截（插件候选变换存在时）：数字键不进入引擎——rime 会自行选
-                    // 引擎候选并返回 committedText，绕过插件候选；映射为对应位置显示候选的
-                    // 点击（selectCandidateAsync 按 candidateActions 分流上屏）。
-                    // actions 为空（无变换）时保持原生数字选词行为不变。
-                    if (!state.isAsciiMode && candState.isComposing &&
-                        key.length == 1 && key[0] in '1'..'9'
-                    ) {
-                        val actions = service.candidateState.value.candidateActions
-                        val digitIndex = key[0] - '1'
-                        if (actions.isNotEmpty() && digitIndex < service.candidateState.value.candidates.size) {
-                            selectCandidateAsync(digitIndex)
-                            return@launch
-                        }
-                    }
+                    // 数字可能是声调、功能编码或选词键，由 Rime 决定；
+                    // 插件候选映射仅用于候选栏点击，不提前消费数字键。
 
-                    // 所有按键统一经过 Rime 引擎
-                    // 字母键不进入此分支（即使 pendingEnglish 非空），需要继续积累编码
+                    // 中文模式的数字不因遗留英文记录而绕过 Rime。
                     // 英文模式（isAsciiMode）下非字母键（QWERTY 上滑的数字/符号、数字/符号面板）
                     // 直接上屏，不进入 Rime 引擎与 pendingEnglish 累积（上滑字符即输即上）。
-                    if ((state.isAsciiMode || pendingEnglish.isNotEmpty()) && !key.matches(Regex("[a-zA-Z]"))) {
+                    if (state.isAsciiMode && !key.matches(Regex("[a-zA-Z]"))) {
                         val finalKey = key
                         withContext(Dispatchers.Main) {
                             // 直接上屏模式：pendingEnglish 对应字符已逐字落盘，只提交增量键值。
@@ -528,11 +540,11 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                         }
                     } else {
                         val isChinese = !state.isAsciiMode
-                        val char = key
-                        val keyCode = key.lowercase()[0].code
-                        val mask = if (isShifted) KeyEvent.META_SHIFT_ON else 0
                         val isLetter = key.matches(Regex("[a-zA-Z]"))
-                        val isShiftedChinese = isShifted && isChinese && isLetter
+                        val char = if (isChinese && isShifted && isLetter) key.uppercase() else key
+                        // 中文保留字符大小写；英文继续使用小写键码 + Shift。
+                        val keyCode = if (isChinese) char[0].code else key.lowercase()[0].code
+                        val mask = if (isShifted && isLetter) KeyEvent.META_SHIFT_ON else 0
 
                         // 非 ASCII 可打印字符（全角符号/中文标点）：直接上屏，不进入 Rime 引擎。
                         // Rime processKey 只接受标准键码，全角键码（如 U+FF0F）无法识别会被静默
@@ -543,9 +555,8 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                         } else if (isShifted && !isLetter) {
                             if (char.length == 1) {
                                 val charCode = char[0].code
-                                val processed = service.rimeEngine.processKey(charCode, 0)
-                                if (processed) {
-                                    val result = service.rimeEngine.getProcessResult(processed)
+                                val result = processKeyAtEditingCaret(charCode, 0)
+                                if (result.processed) {
                                     // commitText 不走 CONFLATED channel：channel 会覆盖丢弃未消费事件，
                                     // 快速打字时中间的 commitText 会被吞（吃键）。
                                     if (result.committedText.isNotEmpty()) {
@@ -563,52 +574,29 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                         } else {
                             // 注：T9 数字键不经过此处（T9KeyboardLayout 直接调
                             // controller.onDigitPressed → applyComposition）。
-                            // 编码编辑态：宿主把字母插入光标处并 setInput 整串重建——
-                            // librime caret 恒在编码末尾，候选始终针对整个编码转换。
-                            val editingCaret = service.editingCaretPos
-                            val editingInput = if (editingCaret >= 0) service.rimeEngine.getInput() else ""
-                            if (!state.isAsciiMode && candState.isComposing && !isShifted &&
-                                editingCaret in 0..editingInput.length && editingInput.isNotEmpty()
-                            ) {
-                                val ch = key.lowercase()[0]
-                                val newInput = editingInput.substring(0, editingCaret) + ch +
-                                    editingInput.substring(editingCaret)
-                                service.editingCaretPos = editingCaret + 1
-                                service.editingCaretInput = newInput
-                                service.rimeEngine.setInput(newInput)
-                                sendTransformedResult(service.rimeEngine.getProcessResult(true)) {
-                                    if (service.calculatorEngine.isActive()) updateCalculatorCandidates()
-                                }
-                                return@launch
-                            } else {
-                                val result = service.rimeEngine.processKeyAndGetResult(keyCode, mask)
+                            // 中间编辑也运行方案按键规则，不直接拼接编码。
+                            val result = processKeyAtEditingCaret(keyCode, mask)
                             if (result.processed) {
-                                if (isShiftedChinese && result.committedText != char) {
-                                    service.rimeEngine.clearComposition()
-                                    committedText = char
-                                    needsUIUpdate = true
-                                } else {
-                                    val committed = result.committedText
-                                    if (state.isAsciiMode && committed.isNotEmpty() && result.inputText.isEmpty() && result.candidates.isEmpty()) {
-                                        val current = candState.pendingEnglishText
-                                        val newPending = current + committed
-                                        service.candidateState.value = service.candidateState.value.copy(pendingEnglishText = newPending)
-                                        // 直接上屏模式：只提交 Rime 返回的增量字符（如智能引号转换结果），
-                                        // 整段 pending 对应的文本已逐字上屏，不可重复提交。
-                                        withContext(Dispatchers.Main) {
-                                            service.commitText(committed)
-                                        }
-                                        sendTransformedResult(result) { if (service.calculatorEngine.isActive()) updateCalculatorCandidates() }
-                                    } else {
-                                        if (committed.isNotEmpty()) {
-                                            withContext(Dispatchers.Main) { service.commitText(committed) }
-                                        }
-                                        sendTransformedResult(result) { if (service.calculatorEngine.isActive()) updateCalculatorCandidates() }
+                                val committed = result.committedText
+                                if (state.isAsciiMode && committed.isNotEmpty() && result.inputText.isEmpty() && result.candidates.isEmpty()) {
+                                    val current = candState.pendingEnglishText
+                                    val newPending = current + committed
+                                    service.candidateState.value = service.candidateState.value.copy(pendingEnglishText = newPending)
+                                    // 直接上屏模式：只提交 Rime 返回的增量字符（如智能引号转换结果），
+                                    // 整段 pending 对应的文本已逐字上屏，不可重复提交。
+                                    withContext(Dispatchers.Main) {
+                                        service.commitText(committed)
                                     }
+                                    sendTransformedResult(result) { if (service.calculatorEngine.isActive()) updateCalculatorCandidates() }
+                                } else {
+                                    if (committed.isNotEmpty()) {
+                                        withContext(Dispatchers.Main) { service.commitText(committed) }
+                                    }
+                                    sendTransformedResult(result) { if (service.calculatorEngine.isActive()) updateCalculatorCandidates() }
                                 }
                             } else {
                                 val isAscii = state.isAsciiMode
-                                if (!candState.isComposing || isShiftedChinese) {
+                                if (!candState.isComposing) {
                                                     if (isAscii) {
                                                         val charToCommit = if (isShifted) char.uppercase() else char.lowercase()
                                                         val currentPending = candState.pendingEnglishText
@@ -637,7 +625,6 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                                     committedText = candidateText + char
                                     needsUIUpdate = true
                                 }
-                            }
                             }
                         }
                     }
@@ -932,48 +919,31 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
 
             // 2. Rime 编码中：让 Rime 处理退格，更新候选
             candState.isComposing || candState.inputText.isNotEmpty() -> {
-                val editingCaret = service.editingCaretPos
-                val editingInput = if (editingCaret > 0) service.rimeEngine.getInput() else ""
-                if (editingCaret > 0 && editingInput.length >= editingCaret) {
-                    // 编码编辑态：宿主删除光标前字符并 setInput 整串重建——librime caret
-                    // 恒在编码末尾，候选始终针对整个编码转换（光标只是编辑位置）
-                    val newInput = editingInput.removeRange(editingCaret - 1, editingCaret)
-                    service.editingCaretPos = if (newInput.isEmpty()) -1 else editingCaret - 1
-                    service.editingCaretInput = newInput
-                    service.rimeEngine.setInput(newInput)
-                    val result = service.rimeEngine.getProcessResult(true)
-                    if (result.inputText.isEmpty()) {
-                        service.rimeEngine.clearComposition()
-                        service.editingCaretPos = -1
-                    }
-                    sendTransformedResult(result) { if (service.calculatorEngine.isActive()) updateCalculatorCandidates() }
-                } else {
-                    service.rimeEngine.processKey(0xff08, 0)
-                    val result = service.rimeEngine.getProcessResult(true)
-                    if (result.inputText.isEmpty()) {
-                        service.rimeEngine.clearComposition()
-                        // T9 部分提交：剩余编码删完后，已上屏/ composing 的部分候选词无法用
-                        // RIME 退格删除，会一直卡在候选栏。这里撤销最近一次部分提交：
-                        // 清空 composing 区域（或删除上屏文本）并从累积列表移除。
-                        if (service.t9PartialSegments.isNotEmpty()) {
-                            val len = service.t9PartialSegments.last().text.length
-                            withContext(Dispatchers.Main) {
-                                if (SettingsPreferences.getInputTextLocation(service)
-                                    == SettingsPreferences.INPUT_TEXT_INPUT_BOX) {
-                                    service.endComposingInputBox()
-                                } else {
-                                    service.deleteBeforeCursor(len)
-                                }
-                            }
-                            // undo 联动：撤销段时回滚用户词典调频。
-                            val undone = service.t9PartialSegments.removeLastOrNull()
-                            if (undone != null) {
-                                service.rimeEngine.t9Forget(undone.text, undone.pinyin)
+                // 声调回退等退格规则也需要在实际编辑位置运行。
+                val result = processKeyAtEditingCaret(0xff08, 0)
+                if (result.inputText.isEmpty()) {
+                    service.rimeEngine.clearComposition()
+                    // T9 部分提交：剩余编码删完后，已上屏/ composing 的部分候选词无法用
+                    // RIME 退格删除，会一直卡在候选栏。这里撤销最近一次部分提交：
+                    // 清空 composing 区域（或删除上屏文本）并从累积列表移除。
+                    if (service.t9PartialSegments.isNotEmpty()) {
+                        val len = service.t9PartialSegments.last().text.length
+                        withContext(Dispatchers.Main) {
+                            if (SettingsPreferences.getInputTextLocation(service)
+                                == SettingsPreferences.INPUT_TEXT_INPUT_BOX) {
+                                service.endComposingInputBox()
+                            } else {
+                                service.deleteBeforeCursor(len)
                             }
                         }
+                        // undo 联动：撤销段时回滚用户词典调频。
+                        val undone = service.t9PartialSegments.removeLastOrNull()
+                        if (undone != null) {
+                            service.rimeEngine.t9Forget(undone.text, undone.pinyin)
+                        }
                     }
-                    sendTransformedResult(result) { if (service.calculatorEngine.isActive()) updateCalculatorCandidates() }
                 }
+                sendTransformedResult(result) { if (service.calculatorEngine.isActive()) updateCalculatorCandidates() }
             }
 
             // 3. 联想词或剪贴板：仅清空候选栏，不回删已上屏字符

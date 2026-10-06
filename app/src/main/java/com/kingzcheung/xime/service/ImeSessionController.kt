@@ -197,12 +197,12 @@ internal class ImeSessionController(private val service: XimeInputMethodService)
      * 计算编码显示串中的光标偏移（字符，-1 = 末尾/非编辑态）。
      *
      * 编辑光标由宿主维护（service.editingCaretPos，相对 raw input）；librime caret
-     * 恒在编码末尾，引擎返回的光标信息不反映编辑位置。此处把 raw 偏移映射到显示串：
+     * 在按键处理时临时同步到编辑位置，生成候选时恢复末尾。此处把 raw 偏移映射到显示串：
      * 逐字符对应、跳过音节分隔符（' 或空格）——全拼的音节分隔回显可精确对应；
      * 显示格式差异大的方案（双拼展开等）仅影响竖线视觉位置，编辑位置仍按 raw input。
      *
-     * 失同步自愈：编码为空、光标越界，或编码与编辑态快照不一致（Shift+字母清组合、
-     * 选词、外部 clearComposition 等非编辑路径改动过编码）时复位编辑态，
+     * 失同步自愈：编码为空、光标越界，或编码与编辑态快照不一致（选词、
+     * 外部 clearComposition 等非编辑路径改动过编码）时复位编辑态，
      * 防止残留位置导致竖线错位或编辑拦截在错误位置删除/插入。
      */
     private fun displayCaretOffset(displayText: String, inputText: String): Int {

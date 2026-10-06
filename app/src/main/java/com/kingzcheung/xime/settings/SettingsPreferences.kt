@@ -111,6 +111,8 @@ object SettingsPreferences {
     private const val KEY_CANDIDATE_TEXT_SIZE = "candidate_text_size"
     const val INPUT_TEXT_INPUT_BOX = "input_box"
     const val INPUT_TEXT_CANDIDATE_BAR = "candidate_bar"
+    const val MIN_PAGE_SIZE = 6
+    const val MAX_PAGE_SIZE = 50
     const val DEFAULT_PAGE_SIZE = 20 // 手机候选栏每页候选词数；schema 里的 page_size 来自 PC 版（5），太短，默认用 20
 
     fun isCompactModeEnabled(context: Context): Boolean {
@@ -673,11 +675,13 @@ object SettingsPreferences {
     }
 
     fun getPageSize(context: Context): Int {
-        return getPrefs(context).getInt(KEY_PAGE_SIZE, DEFAULT_PAGE_SIZE)
+        val value = getPrefs(context).getInt(KEY_PAGE_SIZE, DEFAULT_PAGE_SIZE)
+        return if (value == 0) 0 else value.coerceIn(MIN_PAGE_SIZE, MAX_PAGE_SIZE)
     }
 
     fun setPageSize(context: Context, pageSize: Int) {
-        getPrefs(context).edit().putInt(KEY_PAGE_SIZE, pageSize).apply()
+        val normalized = if (pageSize == 0) 0 else pageSize.coerceIn(MIN_PAGE_SIZE, MAX_PAGE_SIZE)
+        getPrefs(context).edit().putInt(KEY_PAGE_SIZE, normalized).apply()
     }
 
     const val DEFAULT_CANDIDATE_TEXT_SIZE = 19

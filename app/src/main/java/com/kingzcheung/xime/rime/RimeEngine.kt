@@ -76,7 +76,7 @@ data class RimeProcessResult(
      * 由 JNI 一次计算，避免 Kotlin 侧重复取数。
      */
     val t9SyllableOptions: String = "",
-    /** native 快照：组合内光标（raw input 字符偏移）。当前显示层由宿主编辑光标驱动，此字段仅随快照返回。 */
+    /** 按键处理后的 raw input 光标；中间编辑时，候选快照仍针对恢复末尾后的整串编码。 */
     val caretPos: Int = 0,
     /** native 快照：preedit 中的光标（UTF-8 字节偏移）。 */
     val preeditCursorPos: Int = 0,
@@ -294,12 +294,17 @@ class RimeEngine {
         }
     }
 
-    fun processKeyAndGetResult(keycode: Int, mask: Int): RimeProcessResult {
+    /**
+     * [caretPos] >= 0 时，在指定 raw input 位置执行方案按键规则。
+     * JNI 在同一锁内同步光标、处理按键，再恢复末尾以生成整串候选；
+     * 返回的 caretPos 保留按键处理后的编辑位置。
+     */
+    fun processKeyAndGetResult(keycode: Int, mask: Int, caretPos: Int = -1): RimeProcessResult {
         if (!isInitialized) return RimeProcessResult(false, "", "", "", emptyArray(), false, false, false)
         return tryLocked(RimeProcessResult(false, "", "", "", emptyArray(), false, false, false)) {
             if (!nativeHasSession() && !nativeCreateSession())
                 return@tryLocked RimeProcessResult(false, "", "", "", emptyArray(), false, false, false)
-            nativeProcessKeyAndGetResult(keycode, mask)
+            nativeProcessKeyAndGetResult(keycode, mask, caretPos)
         }
     }
 
@@ -763,7 +768,7 @@ class RimeEngine {
     private external fun nativeIsMaintaining(): Boolean
     private external fun nativeGetCurrentSchema(): String?
     private external fun nativeProcessKey(keycode: Int, mask: Int): Boolean
-    private external fun nativeProcessKeyAndGetResult(keycode: Int, mask: Int): RimeProcessResult
+    private external fun nativeProcessKeyAndGetResult(keycode: Int, mask: Int, caretPos: Int): RimeProcessResult
     private external fun nativeGetProcessResult(processed: Boolean): RimeProcessResult
     private external fun nativeGetCandidates(): Array<String>?
     private external fun nativeGetCandidatesWithComments(): Array<Array<String>>?

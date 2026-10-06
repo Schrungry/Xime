@@ -16,6 +16,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <memory>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <unistd.h> // for usleep
@@ -238,7 +239,7 @@ public:
         return result;
     }
 
-    ProcessResult processKeyAndGetResult(int keycode, int mask)
+    ProcessResult processKeyAndGetResult(int keycode, int mask, int caretPos)
     {
         ProcessResult result;
         result.processed = false;
@@ -252,10 +253,24 @@ public:
             return result;
         }
 
+        if (caretPos >= 0)
+        {
+            const char *input = rime->get_input(session_id_);
+            const size_t inputLength = input ? strlen(input) : 0;
+            rime->set_caret_pos(session_id_, std::min(static_cast<size_t>(caretPos), inputLength));
+        }
         LOGD("processKeyAndGetResult: keycode=%d, mask=%d", keycode, mask);
         result.processed = rime->process_key(session_id_, keycode, mask);
         LOGD("processKeyAndGetResult: processed=%d", result.processed);
+        const int editingCaret = static_cast<int>(rime->get_caret_pos(session_id_));
+        if (caretPos >= 0)
+        {
+            // 按键处理器已在编辑位置运行；候选继续针对整串编码生成。
+            const char *input = rime->get_input(session_id_);
+            rime->set_caret_pos(session_id_, input ? strlen(input) : 0);
+        }
         readCurrentState(result);
+        if (caretPos >= 0) result.caretPos = editingCaret;
         return result;
     }
 
@@ -1565,11 +1580,12 @@ extern "C"
         JNIEnv *env,
         jobject thiz,
         jint keycode,
-        jint mask)
+        jint mask,
+        jint caretPos)
     {
         ensureJniCache(env);
 
-        ProcessResult result = Rime::Instance().processKeyAndGetResult(keycode, mask);
+        ProcessResult result = Rime::Instance().processKeyAndGetResult(keycode, mask, caretPos);
 
         jobjectArray candidateArray = env->NewObjectArray(
             result.candidates.size(), gRimeCandidateClass, nullptr);

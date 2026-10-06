@@ -227,9 +227,8 @@ internal fun rememberImeKeyboardCallbacks(
                     if (service.candidateState.value.isComposing &&
                         !isT9Schema(service.uiState.value.currentSchemaId)
                     ) {
-                        // 组合态（仅全键盘）：滑动 = 移动编码编辑光标。光标由宿主维护、
-                        // 仅是插入/删除位置——librime caret 恒在编码末尾，候选始终针对
-                        // 整个编码转换；编辑操作（退格/字母）由路由层按此位置拦截处理。
+                        // 组合态（仅全键盘）：滑动移动宿主编辑光标；路由层在下一次
+                        // 按键处理前同步给 Rime，处理后恢复末尾以生成整串候选。
                         // 上屏（空闲态）后滑动走下方编辑器光标逻辑
                         val input = service.rimeEngine.getInput()
                         if (input.isNotEmpty()) {
