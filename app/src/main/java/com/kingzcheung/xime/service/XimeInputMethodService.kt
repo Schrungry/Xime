@@ -1920,16 +1920,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                         return true
                     }
                 }
-                KeyEvent.KEYCODE_1 -> { keyRouter.selectCandidate(0); highlightIndex.intValue = 0; return true }
-                KeyEvent.KEYCODE_2 -> { keyRouter.selectCandidate(1); highlightIndex.intValue = 0; return true }
-                KeyEvent.KEYCODE_3 -> { keyRouter.selectCandidate(2); highlightIndex.intValue = 0; return true }
-                KeyEvent.KEYCODE_4 -> { keyRouter.selectCandidate(3); highlightIndex.intValue = 0; return true }
-                KeyEvent.KEYCODE_5 -> { keyRouter.selectCandidate(4); highlightIndex.intValue = 0; return true }
-                KeyEvent.KEYCODE_6 -> { keyRouter.selectCandidate(5); highlightIndex.intValue = 0; return true }
-                KeyEvent.KEYCODE_7 -> { keyRouter.selectCandidate(6); highlightIndex.intValue = 0; return true }
-                KeyEvent.KEYCODE_8 -> { keyRouter.selectCandidate(7); highlightIndex.intValue = 0; return true }
-                KeyEvent.KEYCODE_9 -> { keyRouter.selectCandidate(8); highlightIndex.intValue = 0; return true }
-                KeyEvent.KEYCODE_0 -> { keyRouter.selectCandidate(9); highlightIndex.intValue = 0; return true }
+                // 数字键必须继续走 keyRouter，让 Rime/输入方案决定是选词还是编码。
             }
         }
         // Caps Lock 的 meta state 由系统自动维护，与 Shift 同效（物理键盘大小写切换）
