@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.CursorAnchorInfo
 import android.view.inputmethod.EditorInfo
@@ -264,6 +265,13 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     /** 左右 inset（px）：手机上键盘内容避让挖孔/横屏导航栏，平板不做避让（候选栏按钮靠边）。 */
     private val horizontalInsetPxState = mutableStateOf(0 to 0)
     private var hasHardwareKeyboard = false
+    /**
+     * Android 对实体键盘场景的系统决定：是否显示屏幕输入法。
+     * 由 [onEvaluateInputViewShown] 更新，供紧凑候选栏模式复用。
+     */
+    private var systemInputViewShown = true
+    /** 当前会话是否已经由实体键盘接管输入；触摸编辑器后恢复虚拟键盘。 */
+    private var physicalKeyboardActive = false
     /** 物理 Shift 按下到抬起之间是否有其他按键（组合输入大写等），抬起时据此决定是否切换中英文。 */
     private var shiftComboDetected = false
     /** 当前输入框是否受限（密码/终端/NO_SUGGESTIONS，见 EditorInfoClassifier）。
@@ -1864,6 +1872,15 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         val e = event ?: return super.onKeyDown(keyCode, event)
+        // 与 fcitx5-android 一致：虚拟键盘显示期间一旦开始实体键盘输入，
+        // 切换为候选栏紧凑模式；只对实际字符键生效，避免 Ctrl/方向键等快捷键误切换。
+        if (hasHardwareKeyboard && e.unicodeChar != 0 &&
+            !KeyEvent.isModifierKey(keyCode) &&
+            !e.isCtrlPressed && !e.isAltPressed && !e.isMetaPressed
+        ) {
+            physicalKeyboardActive = true
+            applyCompactMode()
+        }
         // 物理 Shift 单击切中英文的组合检测：Shift 按下重置标记，期间任何其他键按下即视为组合
         // （如 Shift+字母大写），抬起时不再触发切换。
         if (isShiftKeyCode(keyCode)) {
@@ -2183,6 +2200,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         info?.let { updateEnterKeyText(it) }
+        physicalKeyboardActive = false
+        systemInputViewShown = super.onEvaluateInputViewShown()
         hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
             resources.configuration.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
         applyCompactMode()
@@ -2237,7 +2256,32 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     }
 
     override fun onEvaluateInputViewShown(): Boolean {
+        // InputMethodService 的默认实现会读取 Android 的
+        // Settings.Secure.SHOW_IME_WITH_HARD_KEYBOARD（“使用屏幕键盘”）。
+        // 保留该判断作为实体键盘模式依据，但始终保留 IME 窗口，
+        // 这样关闭屏幕键盘时仍可显示实体键盘候选栏。
+        systemInputViewShown = super.onEvaluateInputViewShown()
+        applyCompactMode()
         return true
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onViewClicked(focusChanged: Boolean) {
+        super.onViewClicked(focusChanged)
+        physicalKeyboardActive = false
+        systemInputViewShown = super.onEvaluateInputViewShown()
+        applyCompactMode()
+    }
+
+    /** Android 14+ 在编辑器触摸工具类型变化时回调，用于从实体键盘模式恢复。 */
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    override fun onUpdateEditorToolType(toolType: Int) {
+        super.onUpdateEditorToolType(toolType)
+        if (toolType == MotionEvent.TOOL_TYPE_FINGER || toolType == MotionEvent.TOOL_TYPE_STYLUS) {
+            physicalKeyboardActive = false
+            systemInputViewShown = super.onEvaluateInputViewShown()
+            applyCompactMode()
+        }
     }
 
     override fun onShowInputRequested(flags: Int, configChange: Boolean): Boolean {
@@ -2245,9 +2289,11 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        physicalKeyboardActive = false
         hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
             newConfig.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
         super.onConfigurationChanged(newConfig)
+        systemInputViewShown = super.onEvaluateInputViewShown()
         if (newConfig.screenWidthDp > newConfig.screenHeightDp) {
             closeToolPanel()
         }
@@ -2320,11 +2366,14 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     private fun applyCompactMode() {
         val current = uiState.value
         val detectionEnabled = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this)
-        val isCompact = detectionEnabled && hasHardwareKeyboard
+        val isCompact = detectionEnabled && hasHardwareKeyboard &&
+            (!systemInputViewShown || physicalKeyboardActive)
         FileLogger.i(
             TAG,
             "applyCompactMode: keyboardCfg=${keyboardConfigName(resources.configuration.keyboard)}, " +
-                "hasHardwareKeyboard=$hasHardwareKeyboard, isCompact=$isCompact (was ${current.isCompact})"
+                "hasHardwareKeyboard=$hasHardwareKeyboard, systemInputViewShown=$systemInputViewShown, " +
+                "physicalKeyboardActive=$physicalKeyboardActive, " +
+                "isCompact=$isCompact (was ${current.isCompact})"
         )
         if (current.isCompact != isCompact) {
             uiState.value = current.copy(isCompact = isCompact)
