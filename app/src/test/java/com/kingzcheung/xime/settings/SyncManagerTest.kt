@@ -61,6 +61,16 @@ class SyncManagerTest {
         val text = yaml.readText()
         assertTrue(text.contains("installation_id: \"new-id\""))
         assertFalse(text.contains("old-id"))
+        assertTrue(text.contains("rime_version: 1.17.0"))
+    }
+
+    @Test
+    fun `installation id validation rejects path separators and unsafe values`() {
+        assertEquals(null, SettingsPreferences.validateRimeInstallationId("phone-1"))
+        assertTrue(SettingsPreferences.validateRimeInstallationId("") != null)
+        assertTrue(SettingsPreferences.validateRimeInstallationId("../phone") != null)
+        assertTrue(SettingsPreferences.validateRimeInstallationId("phone/name") != null)
+        assertTrue(SettingsPreferences.validateRimeInstallationId("x".repeat(65)) != null)
     }
 
     // ---- packSyncDir / unpackArchive 往返 ----

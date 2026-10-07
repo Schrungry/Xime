@@ -1,5 +1,6 @@
 package com.kingzcheung.xime.ui.settings
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -21,10 +22,12 @@ import androidx.compose.material.icons.twotone.CloudUpload
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -113,6 +116,11 @@ fun BackupSettingsContent(
     var syncRemoteList by remember {
         mutableStateOf<List<com.kingzcheung.xime.plugin.core.api.RemoteBackupEntry>?>(null)
     }
+    var deviceId by remember { mutableStateOf(SettingsPreferences.getRimeInstallationId(context)) }
+    var syncDirectoryUri by remember { mutableStateOf(SettingsPreferences.getRimeSyncDirectoryUri(context)) }
+    var showDeviceIdDialog by remember { mutableStateOf(false) }
+    var deviceIdInput by remember { mutableStateOf(deviceId) }
+    var deviceIdError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(activePlugin) {
         val plugin = activePlugin?.second ?: return@LaunchedEffect
         withContext(Dispatchers.IO) {
@@ -135,6 +143,26 @@ fun BackupSettingsContent(
                     onSuccess = { "已导入 $it 个快照并完成合并" },
                     onFailure = { "导入失败：${it.message}" }
                 )
+            }
+        }
+    }
+
+    val syncDirectoryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busyOp = "directory"
+        message = null
+        scope.launch(Dispatchers.IO) {
+            val result = SyncManager.setExternalSyncDirectory(context, uri)
+            withContext(Dispatchers.Main) {
+                busyOp = null
+                if (result.isSuccess) {
+                    syncDirectoryUri = uri
+                    message = "已设置外部同步目录"
+                } else {
+                    message = "设置同步目录失败：${result.exceptionOrNull()?.message}"
+                }
             }
         }
     }
@@ -214,7 +242,7 @@ fun BackupSettingsContent(
                         Text(
                             text = buildString {
                                 append("设备标识：")
-                                append(SettingsPreferences.getRimeInstallationId(context).take(8))
+                                append(deviceId)
                                 append("　上次同步：")
                                 append(
                                     if (lastSyncAt > 0) {
@@ -226,6 +254,62 @@ fun BackupSettingsContent(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("设备标识", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "用于区分不同设备的词库快照，修改后会创建新的同步分区",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    deviceIdInput = deviceId
+                                    deviceIdError = null
+                                    showDeviceIdDialog = true
+                                },
+                                enabled = !busy
+                            ) { Text("修改") }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("同步目录", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                syncDirectoryUri?.lastPathSegment?.substringAfterLast(':')
+                                    ?: "应用私有目录",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                OutlinedButton(
+                                    onClick = { syncDirectoryLauncher.launch(syncDirectoryUri) },
+                                    enabled = !busy
+                                ) { Text("选择目录") }
+                                if (syncDirectoryUri != null) {
+                                    TextButton(
+                                        onClick = {
+                                            scope.launch(Dispatchers.IO) {
+                                                SyncManager.setExternalSyncDirectory(context, null)
+                                                withContext(Dispatchers.Main) {
+                                                    syncDirectoryUri = null
+                                                    message = "已恢复应用私有同步目录"
+                                                }
+                                            }
+                                        },
+                                        enabled = !busy
+                                    ) { Text("恢复默认") }
+                                }
+                            }
+                            Text(
+                                "选择 Documents 等文件夹后，Xime 会在其中创建 sync/ 快照目录。Rime 数据库仍保存在应用私有目录。",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
                         Button(
                             onClick = {
                                 busyOp = "sync"
@@ -255,7 +339,7 @@ fun BackupSettingsContent(
                             }
                         }
                         Text(
-                            text = "合并本机 sync 目录中已有的快照（含此前导入的），并导出本机最新快照。",
+                            text = "合并同步目录中已有的快照（含此前导入的），并导出本机最新快照。",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.outline
                         )
@@ -687,6 +771,72 @@ fun BackupSettingsContent(
                 }
             },
             onDismiss = { showServicePicker = false }
+        )
+    }
+
+    if (showDeviceIdDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) showDeviceIdDialog = false },
+            title = { Text("修改设备标识") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = deviceIdInput,
+                        onValueChange = {
+                            deviceIdInput = it
+                            deviceIdError = null
+                        },
+                        singleLine = true,
+                        label = { Text("设备标识") },
+                        isError = deviceIdError != null,
+                        supportingText = {
+                            Text(deviceIdError ?: "只能使用字母、数字、点、下划线和短横线")
+                        }
+                    )
+                    Text(
+                        "修改后会使用新的 sync/<设备标识>/ 目录，旧快照不会自动删除。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !busy,
+                    onClick = {
+                        val error = SettingsPreferences.validateRimeInstallationId(deviceIdInput)
+                        if (error != null) {
+                            deviceIdError = error
+                            return@TextButton
+                        }
+                        val normalized = deviceIdInput.trim()
+                        busyOp = "device"
+                        scope.launch(Dispatchers.IO) {
+                            val result = runCatching {
+                                SettingsPreferences.setRimeInstallationId(context, normalized)
+                                SyncManager.ensureInstallationYaml(context)
+                            }
+                            withContext(Dispatchers.Main) {
+                                busyOp = null
+                                result.fold(
+                                    onSuccess = {
+                                        deviceId = normalized
+                                        showDeviceIdDialog = false
+                                        message = "设备标识已更新"
+                                    },
+                                    onFailure = { deviceIdError = it.message ?: "设备标识更新失败" }
+                                )
+                            }
+                        }
+                    }
+                ) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !busy,
+                    onClick = { showDeviceIdDialog = false }
+                ) { Text("取消") }
+            }
         )
     }
 }

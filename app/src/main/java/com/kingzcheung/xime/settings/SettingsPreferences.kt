@@ -2,6 +2,7 @@ package com.kingzcheung.xime.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import com.kingzcheung.xime.clipboard.ClipboardImageStore
 import com.kingzcheung.xime.plugin.core.runtime.PluginManager
 
@@ -49,6 +50,7 @@ object SettingsPreferences {
     const val KEY_HARDWARE_KEYBOARD_DETECTION_ENABLED = "hardware_keyboard_detection_enabled"
 
     private const val KEY_RIME_INSTALLATION_ID = "rime_installation_id"
+    private const val KEY_RIME_SYNC_DIRECTORY_URI = "rime_sync_directory_uri"
 
     private const val KEY_LAST_RIME_SYNC_AT = "last_rime_sync_at"
 
@@ -543,10 +545,43 @@ object SettingsPreferences {
      */
     fun getRimeInstallationId(context: Context): String {
         val prefs = getPrefs(context)
-        prefs.getString(KEY_RIME_INSTALLATION_ID, null)?.let { return it }
+        prefs.getString(KEY_RIME_INSTALLATION_ID, null)
+            ?.takeIf { validateRimeInstallationId(it) == null }
+            ?.let { return it }
         val id = java.util.UUID.randomUUID().toString()
         prefs.edit().putString(KEY_RIME_INSTALLATION_ID, id).apply()
         return id
+    }
+
+    /** 可作为 Rime sync 目录名和远端文件名的设备标识。 */
+    fun validateRimeInstallationId(value: String): String? {
+        val normalized = value.trim()
+        return when {
+            normalized.isEmpty() -> "设备标识不能为空"
+            normalized == "." || normalized == ".." -> "设备标识不能为 . 或 .."
+            normalized.length > 64 -> "设备标识最多 64 个字符"
+            !normalized.matches(Regex("[A-Za-z0-9._-]+")) ->
+                "设备标识只能包含字母、数字、点、下划线和短横线"
+            else -> null
+        }
+    }
+
+    fun setRimeInstallationId(context: Context, value: String) {
+        val normalized = value.trim()
+        require(validateRimeInstallationId(normalized) == null) { "无效的设备标识" }
+        getPrefs(context).edit().putString(KEY_RIME_INSTALLATION_ID, normalized).apply()
+    }
+
+    /** 用户选择的外部同步根目录（目录下由宿主创建 sync/ 子目录）。 */
+    fun getRimeSyncDirectoryUri(context: Context): Uri? =
+        getPrefs(context).getString(KEY_RIME_SYNC_DIRECTORY_URI, null)
+            ?.let { runCatching { Uri.parse(it) }.getOrNull() }
+
+    fun setRimeSyncDirectoryUri(context: Context, uri: Uri?) {
+        getPrefs(context).edit().apply {
+            if (uri == null) remove(KEY_RIME_SYNC_DIRECTORY_URI)
+            else putString(KEY_RIME_SYNC_DIRECTORY_URI, uri.toString())
+        }.apply()
     }
 
     /** 上次词库同步完成时间（毫秒时间戳，0=从未同步）。 */

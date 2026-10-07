@@ -13,6 +13,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -23,8 +25,8 @@ import java.util.zip.ZipOutputStream
  * - sync 目录固定在引擎用户目录下（filesDir/rime/sync/<installation_id> 下的 .userdb.txt），
  *   与桌面端 rime 的 sync 目录同构；快照为 TSV 文本，librime 以时间戳合并进 userdb，
  *   规避对 leveldb 文件做整体覆盖的一致性风险。
- * - 数据不出私有目录，无外部存储权限：导入/导出走文件选择器与 Downloads，
- *   远端走备份插件通道（快照包固定名 rime-sync-<installation_id>.zip，
+ * - 默认数据保留在私有目录，无外部存储权限；用户可选 SAF 目录作为快照镜像，
+ *   导入/导出仍走文件选择器与 Downloads，远端走备份插件通道（快照包固定名 rime-sync-<installation_id>.zip，
  *   与云备份的配置包在同一远端目录下按前缀隔离，互不感知）。
  *
  * 与云备份（[BackupManager]）的语义分工：云备份=时间点覆盖式灾难恢复（全量），
@@ -44,18 +46,36 @@ object SyncManager {
 
     /**
      * 稳定 installation id 核心（纯 JVM 便于单测）：yaml 缺失或 id 不一致时
-     * 以 [stableId] 重写最小集（仅 installation_id，其余字段由 librime 的
-     * installation_update 维护并保留该 id）。
+     * 以 [stableId] 更新 installation_id，其余字段保持不变。
      * 场景：部署会删除 installation.yaml；云备份恢复可能带回旧 id 的文件。
      */
     internal fun ensureInstallationFile(yamlFile: File, stableId: String): String {
-        val currentId = if (yamlFile.exists()) {
-            yamlFile.readLines().firstOrNull { it.trimStart().startsWith("installation_id:") }
-                ?.substringAfter(':')?.trim()?.trim('"', '\'')
-        } else null
+        val original = if (yamlFile.exists()) yamlFile.readText() else ""
+        val currentId = original.lineSequence()
+            .firstOrNull { it.trimStart().startsWith("installation_id:") }
+            ?.substringAfter(':')?.trim()?.trim('"', '\'')
         if (currentId == stableId) return stableId
         yamlFile.parentFile?.mkdirs()
-        yamlFile.writeText("installation_id: \"$stableId\"\n")
+        val lines = original.lines().toMutableList()
+        val index = lines.indexOfFirst { it.trimStart().startsWith("installation_id:") }
+        if (index >= 0) lines[index] = "installation_id: \"$stableId\""
+        else {
+            if (lines.size == 1 && lines[0].isEmpty()) lines.clear()
+            lines.add("installation_id: \"$stableId\"")
+        }
+        val updated = lines.joinToString("\n").trimEnd() + "\n"
+        val temp = File(yamlFile.parentFile, ".${yamlFile.name}.tmp-${UUID.randomUUID()}")
+        temp.writeText(updated)
+        try {
+            Files.move(
+                temp.toPath(),
+                yamlFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE
+            )
+        } catch (_: Exception) {
+            Files.move(temp.toPath(), yamlFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
         return stableId
     }
 
@@ -65,20 +85,52 @@ object SyncManager {
             SettingsPreferences.getRimeInstallationId(context)
         )
 
+    /** 保存 SAF 外部同步目录并持久化读写授权；传 null 恢复应用私有目录。 */
+    fun setExternalSyncDirectory(context: Context, uri: Uri?): Result<Unit> = try {
+        val previous = SettingsPreferences.getRimeSyncDirectoryUri(context)
+        if (uri != null) {
+            val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+        }
+        if (previous != null && previous != uri) {
+            runCatching {
+                context.contentResolver.releasePersistableUriPermission(
+                    previous,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+        }
+        SettingsPreferences.setRimeSyncDirectoryUri(context, uri)
+        Result.success(Unit)
+    } catch (e: SecurityException) {
+        Result.failure(IllegalStateException("无法保存该目录的长期访问权限，请重新选择可写文件夹", e))
+    }
+
     // ---------- 同步 ----------
 
-    /** 立即同步：合并 sync 目录下已有快照 + 导出本机快照。须在引擎所在进程调用。 */
+    /** 立即同步：合并本地/外部 sync 快照并导出本机最新快照。须在引擎所在进程调用。 */
     fun syncNow(context: Context): Result<Unit> {
         ensureInstallationYaml(context)
         if (!RimeEngine.isInitialized()) {
             return Result.failure(IllegalStateException("输入法引擎尚未初始化，请先在任意输入框唤起键盘一次"))
         }
-        return if (RimeEngine.getInstance().syncUserData()) {
-            SettingsPreferences.setLastRimeSyncAt(context, System.currentTimeMillis())
-            Result.success(Unit)
-        } else {
-            Result.failure(IllegalStateException("同步未完成，详见应用日志"))
+        val rimeDir = File(context.filesDir, "rime")
+        val externalUri = SettingsPreferences.getRimeSyncDirectoryUri(context)
+        if (externalUri != null) {
+            SafSyncDirectory.importIntoLocal(context, externalUri, File(rimeDir, "sync"))
+                .getOrElse { return Result.failure(it) }
         }
+        if (!RimeEngine.getInstance().syncUserData()) {
+            return Result.failure(IllegalStateException("同步未完成，详见应用日志"))
+        }
+        if (externalUri != null) {
+            SafSyncDirectory.exportFromLocal(context, externalUri, File(rimeDir, "sync"))
+                .getOrElse { return Result.failure(it) }
+        }
+        SettingsPreferences.setLastRimeSyncAt(context, System.currentTimeMillis())
+        return Result.success(Unit)
     }
 
     // ---------- 打包 / 解包（纯 JVM，单测锚定） ----------
