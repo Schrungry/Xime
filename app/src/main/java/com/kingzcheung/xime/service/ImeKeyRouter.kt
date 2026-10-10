@@ -59,6 +59,54 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
         }
     }
 
+    /**
+     * 处理实体键盘 Enter。物理按键保留原始 Return keysym 和 Shift mask，
+     * 由 Rime/方案决定确认候选、上屏编码、上屏脚本文本或其他自定义行为。
+     */
+    internal fun handleHardwareEnter(event: KeyEvent) {
+        val isShifted = event.isShiftPressed
+        val state = service.uiState.value
+        // 工具面板和快捷发送表单的 Enter 是宿主控件动作，不能交给主方案。
+        if (state.toolPanelInputFocused || state.showQuickSendForm) {
+            handleKeyPress("enter", isShifted)
+            return
+        }
+        if (state.isVoiceMode && state.voiceSticky) {
+            service.sealVoiceSessionForSend()
+        }
+        service.finishDeleteSession()
+        val job = service.serviceScope.launch(service.keyProcessingDispatcher, start = CoroutineStart.LAZY) {
+            service.calculatorEngine.clear()
+            updateCalculatorCandidates()
+            // Rime 的默认 Return 绑定在空组合时也可能返回 processed=true。
+            // 只有按键前确实存在组合，或 Rime 实际提交文本时，才算由输入法消费 Enter；
+            // 空闲聊天框必须继续执行编辑器的发送/换行动作。
+            val hadComposition = service.candidateState.value.isComposing ||
+                service.rimeEngine.getInput().isNotEmpty()
+            val result = processKeyAtEditingCaret(
+                0xff0d,
+                if (isShifted) KeyEvent.META_SHIFT_ON else 0,
+            )
+            val consumedByRime = result.committedText.isNotEmpty() ||
+                (result.processed && (hadComposition || result.inputText.isNotEmpty() || result.preeditText.isNotEmpty()))
+            if (consumedByRime) {
+                if (result.committedText.isNotEmpty()) {
+                    withContext(Dispatchers.Main) { service.commitText(result.committedText) }
+                }
+                sendTransformedResult(result)
+            } else {
+                val current = service.candidateState.value
+                if (current.isComposing) {
+                    commitComposingInput(current, service.uiState.value.currentSchemaId)
+                    resetEnterLikeCandidates(service.uiState.value.currentSchemaId)
+                } else {
+                    dispatchEditorEnter()
+                }
+            }
+        }
+        service.keyJobs.trySend(job)
+    }
+
     internal fun handleKeyPress(key: String, isShifted: Boolean) {
         // 空键无任何按键语义，且下游 Rime 路由按 key[0] 取码，
         // 空串会越界崩溃（2026-09-14 真机实证：滑动手势 commit 值为空时触发）。
@@ -348,7 +396,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                     needsUIUpdate = true
                 }
                 "enter" -> {
-                    // 动态回车：组合态提交编码；空闲态按编辑器 imeOptions 执行动作（发送/搜索/下一项…）或换行。
+                    // 动态回车：组合态提交编码；空闲态按编辑器 imeOptions 执行动作或换行。
                     service.calculatorEngine.clear()
                     updateCalculatorCandidates()
                     if (candState.isComposing) {
@@ -356,21 +404,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                         needsUIUpdate = true
                     } else {
                         service.rimeEngine.clearComposition()
-                        withContext(Dispatchers.Main) {
-                            val imeOptions = service.currentInputEditorInfo?.imeOptions ?: 0
-                            val action = imeOptions and EditorInfo.IME_MASK_ACTION
-                            val noEnterAction = imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
-                            when {
-                                noEnterAction -> service.sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
-                                action == EditorInfo.IME_ACTION_GO ||
-                                action == EditorInfo.IME_ACTION_SEARCH ||
-                                action == EditorInfo.IME_ACTION_SEND ||
-                                action == EditorInfo.IME_ACTION_NEXT ||
-                                action == EditorInfo.IME_ACTION_DONE ->
-                                    service.currentInputConnection?.performEditorAction(action)
-                                else -> service.sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
-                            }
-                        }
+                        dispatchEditorEnter()
                     }
                     resetEnterLikeCandidates(state.currentSchemaId)
                 }
@@ -739,6 +773,24 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
             service.rimeEngine.clearComposition()
         }
         withContext(Dispatchers.Main) { service.endComposingInputBox() }
+    }
+
+    private suspend fun dispatchEditorEnter() {
+        withContext(Dispatchers.Main) {
+            val imeOptions = service.currentInputEditorInfo?.imeOptions ?: 0
+            val action = imeOptions and EditorInfo.IME_MASK_ACTION
+            val noEnterAction = imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
+            when {
+                noEnterAction -> service.sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
+                action == EditorInfo.IME_ACTION_GO ||
+                action == EditorInfo.IME_ACTION_SEARCH ||
+                action == EditorInfo.IME_ACTION_SEND ||
+                action == EditorInfo.IME_ACTION_NEXT ||
+                action == EditorInfo.IME_ACTION_DONE ->
+                    service.currentInputConnection?.performEditorAction(action)
+                else -> service.sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
+            }
+        }
     }
 
     /** 回车类按键收尾：清空候选态（enter / newline 共用），T9 方案额外复位分段选择状态。 */

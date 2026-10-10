@@ -1907,6 +1907,10 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             // 其余 Ctrl 组合（Ctrl+方向键词移动、Ctrl+Shift 系列等）交还系统与目标应用处理
             return super.onKeyDown(keyCode, event)
         }
+        if (keyCode == KeyEvent.KEYCODE_ENTER) {
+            keyRouter.handleHardwareEnter(e)
+            return true
+        }
         if (hasHardwareKeyboard && candidateState.value.candidates.isNotEmpty()) {
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -1930,7 +1934,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                     highlightIndex.intValue = (highlightIndex.intValue - 1).coerceAtLeast(0)
                     return true
                 }
-                KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_ENTER -> {
+                KeyEvent.KEYCODE_SPACE -> {
                     if (candidateState.value.candidates.isNotEmpty()) {
                         keyRouter.selectCandidate(highlightIndex.intValue)
                         highlightIndex.intValue = 0
@@ -2002,6 +2006,11 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
+        // restarting=true 表示同一编辑器刷新（例如聊天应用发送消息后重建输入连接）。
+        // 保留实体键盘接管状态，避免发送后无触摸操作却重新弹出虚拟键盘。
+        if (!restarting) {
+            physicalKeyboardActive = false
+        }
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         loadDarkModePreference()
 
@@ -2200,7 +2209,6 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         info?.let { updateEnterKeyText(it) }
-        physicalKeyboardActive = false
         systemInputViewShown = super.onEvaluateInputViewShown()
         hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
             resources.configuration.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
@@ -2409,6 +2417,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
 
     override fun onFinishInput() {
         super.onFinishInput()
+        physicalKeyboardActive = false
         inlineSuggestionManager?.clear()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         // 会话结束：引擎 ascii 归位默认中文，英文态不跨会话残留
