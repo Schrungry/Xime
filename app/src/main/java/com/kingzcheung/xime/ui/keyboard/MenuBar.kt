@@ -125,9 +125,10 @@ fun MenuBar(
     val floatingLabel = if (state.isFloatingMode) "退出悬浮" else "悬浮模式"
     val floatingAction = callbacks.onFloatingModeToggle ?: {}
 
-    // 动态方案开关：图标取第一个状态的首字；标题若有 abbrev 则用 abbrev（多个用 🔁 连接），否则用所有状态 🔁 连接
+    // 动态方案开关：大字显示当前状态；标题显示可循环切换的状态列表。
     val switchItems = state.schemaSwitches.map { sw ->
-        val textIcon = sw.states.firstOrNull()?.firstOrNull()?.toString() ?: ""
+        val currentIndex = sw.currentIndex.coerceIn(0, (sw.states.size - 1).coerceAtLeast(0))
+        val textIcon = sw.states.getOrNull(currentIndex).orEmpty()
         val label = if (sw.abbrev.isNotEmpty()) sw.abbrev.joinToString("🔁")
             else sw.states.joinToString("🔁")
         MenuItem(icon = null, label = label, action = { callbacks.onToggleSchemaSwitch?.invoke(sw) }, textIcon = textIcon)
@@ -303,7 +304,7 @@ fun MenuItemButton(
             Text(
                 text = item.textIcon,
                 color = textColor.copy(alpha = 0.7f),
-                fontSize = if (isLandscape) 18.sp else 24.sp,
+                fontSize = if (isLandscape) 14.sp else 16.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1
             )
