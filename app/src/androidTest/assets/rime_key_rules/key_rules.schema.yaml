@@ -1,0 +1,20 @@
+schema:
+  schema_id: key_rules
+  name: Key rules regression fixture
+  version: "1.0"
+engine:
+  processors:
+    - lua_processor@*key_rules
+    - speller
+    - selector
+    - express_editor
+  segmentors:
+    - abc_segmentor
+    - fallback_segmentor
+  translators:
+    - lua_translator@*key_candidates
+speller:
+  alphabet: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ7890
+  initials: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ
+menu:
+  page_size: 6
