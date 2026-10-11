@@ -552,7 +552,7 @@ fun BackupSettingsContent(
                             }
                         }
                         Text(
-                            "外部目录中使用 sync/ 保存词库快照；Rime 数据库仍保存在应用私有目录。",
+                            "词库快照复制到所选目录；Rime 数据库仍保存在应用私有目录。",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

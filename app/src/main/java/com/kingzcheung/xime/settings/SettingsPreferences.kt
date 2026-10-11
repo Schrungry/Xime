@@ -590,7 +590,7 @@ object SettingsPreferences {
         getPrefs(context).edit().putString(KEY_RIME_INSTALLATION_ID, normalized).apply()
     }
 
-    /** 用户选择的外部同步根目录（目录下由宿主创建 sync/ 子目录）。 */
+    /** 用户选择的外部同步根目录（直接保存 sync 目录中的快照层级）。 */
     fun getRimeSyncDirectoryUri(context: Context): Uri? =
         getPrefs(context).getString(KEY_RIME_SYNC_DIRECTORY_URI, null)
             ?.let { runCatching { Uri.parse(it) }.getOrNull() }

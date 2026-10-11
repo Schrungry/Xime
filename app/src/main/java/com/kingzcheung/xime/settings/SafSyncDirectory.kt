@@ -7,10 +7,9 @@ import java.io.File
 
 /**
  * 将 Rime 的文本快照镜像到用户通过 Storage Access Framework 选择的目录。
- * 外部目录只保存 sync 快照，Rime 的 userdb 仍保留在应用私有目录。
+ * 外部目录直接保存 sync 目录中的快照，Rime 的 userdb 仍保留在应用私有目录。
  */
 internal object SafSyncDirectory {
-    private const val SYNC_DIR = "sync"
     private const val TEMP_SUFFIX = ".xime-tmp"
     private const val MIME_DIRECTORY = "vnd.android.document/directory"
     private const val MIME_BINARY = "application/octet-stream"
@@ -18,10 +17,10 @@ internal object SafSyncDirectory {
     private data class Child(val uri: Uri, val name: String, val isDirectory: Boolean)
 
     fun importIntoLocal(context: Context, treeUri: Uri, localSyncDir: File): Result<Int> = runCatching {
-        val syncUri = findOrCreateDirectory(context, treeUri, rootDocumentUri(treeUri), SYNC_DIR)
+        val rootUri = rootDocumentUri(treeUri)
         localSyncDir.mkdirs()
         var count = 0
-        walk(context, treeUri, syncUri, "") { uri, relativePath ->
+        walk(context, treeUri, rootUri, "") { uri, relativePath ->
             if (relativePath.endsWith(TEMP_SUFFIX) || !relativePath.endsWith(".userdb.txt")) return@walk
             val target = checkedTarget(localSyncDir, relativePath)
             target.parentFile?.mkdirs()
@@ -34,7 +33,7 @@ internal object SafSyncDirectory {
     }
 
     fun exportFromLocal(context: Context, treeUri: Uri, localSyncDir: File): Result<Int> = runCatching {
-        val syncUri = findOrCreateDirectory(context, treeUri, rootDocumentUri(treeUri), SYNC_DIR)
+        val rootUri = rootDocumentUri(treeUri)
         if (!localSyncDir.isDirectory) return@runCatching 0
         var count = 0
         localSyncDir.walkTopDown()
@@ -43,7 +42,7 @@ internal object SafSyncDirectory {
             val relativePath = source.relativeTo(localSyncDir).path.replace(File.separatorChar, '/')
             val parts = relativePath.split('/').filter { it.isNotEmpty() }
             require(parts.none { it == "." || it == ".." }) { "非法同步文件路径：$relativePath" }
-            var parent = syncUri
+            var parent = rootUri
             parts.dropLast(1).forEach { part ->
                 parent = findOrCreateDirectory(context, treeUri, parent, part)
             }
@@ -69,13 +68,12 @@ internal object SafSyncDirectory {
             require(child.isDirectory) { "外部同步路径不是目录：$name" }
             return child.uri
         }
-        val uri = DocumentsContract.createDocument(
+        return DocumentsContract.createDocument(
             context.contentResolver,
             parentUri,
             MIME_DIRECTORY,
             name
         ) ?: error("无法创建外部同步目录：$name")
-        return uri
     }
 
     private fun findChild(context: Context, treeUri: Uri, parentUri: Uri, name: String): Child? =
