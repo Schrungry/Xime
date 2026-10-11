@@ -492,7 +492,7 @@ keyboard:
       mode_change: { width: 1.2, tap: { action: command, value: mode_change }, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
       # 空格键：单击上屏空格；长按进入语音输入（含麦克风权限校验）
       # 长按若想改为「重复空格」：long_press: { values: [ { action: repeat_space, value: 5 } ] }
-      space: { width: 3, tap: { action: space }, long_press: { values: [ { action: voice } ] } }
+      space: { width: 3, tap: { action: space }, long_press: { values: [ { label: "语音", action: voice } ] } }
       # 回车键
       enter: { width: 1.2, tap: { action: enter } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
@@ -553,7 +553,7 @@ keyboard:
       mode_change: { width: 1.2, tap: { action: command, value: mode_change }, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
       # 空格键：单击上屏空格；长按进入语音输入（含麦克风权限校验）
       # 长按若想改为「重复空格」：long_press: { values: [ { action: repeat_space, value: 5 } ] }
-      space: { width: 3, tap: { action: space }, long_press: { values: [ { action: voice } ] } }
+      space: { width: 3, tap: { action: space }, long_press: { values: [ { label: "语音", action: voice } ] } }
       # 回车键
       enter: { width: 1.2, tap: { action: enter } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
@@ -665,10 +665,11 @@ keyboard:
 
   # 九键（T9）键盘配置
   # 注意：本键盘不支持 button_layout（按键布局模式），固定 standard 键面布局；
-  # 此处配置 button_layout: compact 不生效（compact 仅 26 键 qwerty/qwerty_en 支持）。
+  # 此处配置 button_layout: compact 不生效（compact 仅全键盘段支持：qwerty/qwerty_en 与合并键段；本段不解析）。
   # schemas 声明使用九键布局的方案，未声明的方案一律全键盘；
   # 第三方九键方案在 xime.custom.yaml 的 t9.schemas 追加即可，无需改代码。
   t9:
+    type: t9
     schemas: [t9_pinyin, t9, wanxiang_t9, rime_frost_t9]
     # ── 布局（三列结构，可完全自定义；未配置时为以下内置默认，与历史布局一致）──
     # left：左列（自上而下）。candidates = 拼音候选面板占位（候选态显示音节，
@@ -705,9 +706,13 @@ keyboard:
       - "！"
     # ── 数字键手势（可自定义：在 xime.custom.yaml 的 keyboard.t9.keys 同路径覆盖）──
     # 键 id 为数字字符串 "1"~"9"（也可为 layout 中出现的自定义键 id）。
-    # 内置默认：上滑直接输入键面数字（无需切数字键盘）；下滑内置不绑定动作，
+    # 内置默认：上滑直接输入键面数字（无需切数字键盘）；下滑/左滑/右滑内置不绑定动作，
     # 可按键级自行配置（如 swipe_down: { label: "复制", action: "copy" }，
     # 或 switch_route: clipboard 打开剪贴板面板）。
+    # 左右滑默认不绑定：横向滑动仍用于移动光标；某键配置了 swipe_left/swipe_right 后，
+    # 该键上的横向滑动即由按键接管（执行配置动作），不再移动光标（未配置的键不受影响）。
+    # 提示显示：上/下/左/右滑的 label 均按 display 画在键面（上=键上方、下=键下方、
+    # 左/右=键边缘与居中主字符之间的空档正中）；display: bubble 时不印键面。
     # 动作可选值见 GestureAction：commit/select_all/copy/cut/paste/line_start/line_end/
     # undo/repeat/command/switch_route（value: emoji|symbol|clipboard 打开对应面板）等；
     # display 只管静态提示位置：key（画在键面）/ bubble（不画键面，留给气泡）/ both；
@@ -734,10 +739,11 @@ keyboard:
 
   # 笔画键盘配置
   # 注意：本键盘不支持 button_layout（按键布局模式），固定 standard 键面布局；
-  # 此处配置 button_layout: compact 不生效（compact 仅 26 键 qwerty/qwerty_en 支持）。
+  # 此处配置 button_layout: compact 不生效（compact 仅全键盘段支持：qwerty/qwerty_en 与合并键段；本段不解析）。
   # schemas 声明使用笔画布局的方案，未声明的方案一律全键盘；
   # 第三方笔画方案在 xime.custom.yaml 的 stroke.schemas 追加即可。
   stroke:
+    type: stroke
     schemas: [stroke]
     # ── 左侧快捷符号列（常显；列表长度不限，超过 3 个时滚动显示）──
     # 用户在 xime.custom.yaml 的同路径覆盖整个列表，未配置时使用内置默认值
@@ -772,4 +778,5 @@ keyboard:
   # 未声明的方案一律全键盘；第三方手写方案在 xime.custom.yaml 的
   # handwriting.schemas 追加即可，无需改代码。
   handwriting:
+    type: handwriting
     schemas: [handwriting]
