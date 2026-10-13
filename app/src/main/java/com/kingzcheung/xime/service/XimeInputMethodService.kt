@@ -275,6 +275,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     private var physicalKeyboardActive = false
     /** 物理 Shift 按下到抬起之间是否有其他按键（组合输入大写等），抬起时据此决定是否切换中英文。 */
     private var shiftComboDetected = false
+    /** 已由 IME 消费的实体按键；对应 key-up 不能再次回放给编辑器。 */
+    private val consumedHardwareKeyCodes = mutableSetOf<Int>()
     /** 当前输入框是否受限（密码/终端/NO_SUGGESTIONS，见 EditorInfoClassifier）。
      *  主线程写（onStartInput）、key-processing 线程读（英文联想短路），volatile 保证可见性。 */
     @Volatile
@@ -1879,6 +1881,30 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         }
     }
 
+    private fun markHardwareKeyConsumed(keyCode: Int) {
+        consumedHardwareKeyCodes += keyCode
+    }
+
+    private fun consumeHardwareKey(keyCode: Int): HardwareKeyHandlingResult {
+        markHardwareKeyConsumed(keyCode)
+        return HardwareKeyHandlingResult.IME_CONSUMED
+    }
+
+    private fun replayHardwareEvent(event: KeyEvent): HardwareKeyHandlingResult {
+        val snapshot = HardwareKeyEvent.capture(event)
+        return snapshot.replayTo(currentInputConnection)
+    }
+
+    private fun forwardHardwareEvent(event: KeyEvent, down: Boolean): HardwareKeyHandlingResult {
+        val replayResult = replayHardwareEvent(event)
+        if (down && replayResult == HardwareKeyHandlingResult.FORWARDED_TO_EDITOR) {
+            consumedHardwareKeyCodes.remove(event.keyCode)
+        }
+        if (replayResult == HardwareKeyHandlingResult.FORWARDED_TO_EDITOR) return replayResult
+        val handled = if (down) super.onKeyDown(event.keyCode, event) else super.onKeyUp(event.keyCode, event)
+        return if (handled) HardwareKeyHandlingResult.FORWARDED_TO_EDITOR else HardwareKeyHandlingResult.UNHANDLED
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         val e = event ?: return super.onKeyDown(keyCode, event)
         // 与 fcitx5-android 一致：虚拟键盘显示期间一旦开始实体键盘输入，
@@ -1894,6 +1920,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         // （如 Shift+字母大写），抬起时不再触发切换。
         if (isShiftKeyCode(keyCode)) {
             if (e.repeatCount == 0) shiftComboDetected = false
+            markHardwareKeyConsumed(keyCode)
         } else {
             shiftComboDetected = true
         }
@@ -1911,67 +1938,100 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             }
             if (actionId != 0) {
                 performEditorMenuAction(actionId)
+                consumeHardwareKey(keyCode)
                 return true
             }
             // 其余 Ctrl 组合（Ctrl+方向键词移动、Ctrl+Shift 系列等）交还系统与目标应用处理
-            return super.onKeyDown(keyCode, event)
+            return forwardHardwareEvent(e, down = true) != HardwareKeyHandlingResult.UNHANDLED
         }
         if (keyCode == KeyEvent.KEYCODE_ENTER) {
-            keyRouter.handleHardwareEnter(e)
+            keyRouter.handleHardwareEnter(e) { result ->
+                debugLog("hardware enter result=$result")
+            }
+            consumeHardwareKey(keyCode)
             return true
+        }
+        // Esc：输入法会话活跃（编码中/有候选/有联想/英文待上屏）时清除组合并吞键，
+        // 避免目标应用把 Esc 当作"退出页面/关闭"默认行为执行；
+        // 完全空会话时放行，保留系统 Esc 语义（关闭对话框等）。
+        if (hasHardwareKeyboard && (keyCode == KeyEvent.KEYCODE_ESCAPE || keyCode == KeyEvent.KEYCODE_BACK)) {
+            val cs = candidateState.value
+            if (cs.isComposing || cs.inputText.isNotEmpty() || cs.pendingEnglishText.isNotEmpty() ||
+                cs.candidates.isNotEmpty() || cs.associationCandidates.isNotEmpty()
+            ) {
+                keyRouter.handleKeyPress("clear_composition", false)
+                highlightIndex.intValue = 0
+                debugLog("esc keydown (keycode = ${keyCode})")
+                consumeHardwareKey(keyCode)
+                return true
+            }
         }
         if (hasHardwareKeyboard && candidateState.value.candidates.isNotEmpty()) {
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
                     if (keyboardViewModel.candidatePageExpanded.value) {
-                        expandedPageScroll(1); highlightIndex.intValue = 0; return true
+                        expandedPageScroll(1); highlightIndex.intValue = 0; consumeHardwareKey(keyCode); return true
                     }
-                    if (candidateState.value.hasNextPage) { keyRouter.pageDown(); highlightIndex.intValue = 0; return true }
+                    if (candidateState.value.hasNextPage) { keyRouter.pageDown(); highlightIndex.intValue = 0; consumeHardwareKey(keyCode); return true }
                 }
                 KeyEvent.KEYCODE_DPAD_UP -> {
                     if (keyboardViewModel.candidatePageExpanded.value) {
-                        expandedPageScroll(-1); highlightIndex.intValue = 0; return true
+                        expandedPageScroll(-1); highlightIndex.intValue = 0; consumeHardwareKey(keyCode); return true
                     }
-                    if (candidateState.value.hasPrevPage) { keyRouter.pageUp(); highlightIndex.intValue = 0; return true }
+                    if (candidateState.value.hasPrevPage) { keyRouter.pageUp(); highlightIndex.intValue = 0; consumeHardwareKey(keyCode); return true }
                 }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                     val maxIdx = candidateState.value.candidates.size - 1
                     highlightIndex.intValue = (highlightIndex.intValue + 1).coerceAtMost(maxIdx)
+                    consumeHardwareKey(keyCode)
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_LEFT -> {
                     highlightIndex.intValue = (highlightIndex.intValue - 1).coerceAtLeast(0)
+                    consumeHardwareKey(keyCode)
                     return true
                 }
                 KeyEvent.KEYCODE_SPACE -> {
                     if (candidateState.value.candidates.isNotEmpty()) {
                         keyRouter.selectCandidate(highlightIndex.intValue)
                         highlightIndex.intValue = 0
+                        consumeHardwareKey(keyCode)
                         return true
                     }
                 }
                 // 数字键必须继续走 keyRouter，让 Rime/输入方案决定是选词还是编码。
             }
         }
-        // Caps Lock 的 meta state 由系统自动维护，与 Shift 同效（物理键盘大小写切换）
-        val isShifted = e.isShiftPressed || e.isCapsLockOn
-        val key = keyCodeToKey(keyCode, isShifted)
+        // Caps Lock 的 meta state 由系统自动维护，在键入字母时与 Shift 同效（物理键盘大小写切换），键入其他字符时不影响。
+        val isShifted = e.isShiftPressed
+        val isCapsLockOn = e.isCapsLockOn
+        val key = keyCodeToKey(keyCode, isShifted, isCapsLockOn)
         if (key != null) {
-            keyRouter.handleKeyPress(key, isShifted)
+            val hardwareEvent = HardwareKeyEvent.capture(e)
+            keyRouter.handleKeyPress(key, isShifted, isCapsLockOn, hardwareEvent) { result ->
+                if (result == HardwareKeyHandlingResult.FORWARDED_TO_EDITOR) {
+                    consumedHardwareKeyCodes.remove(keyCode)
+                }
+            }
+            consumeHardwareKey(keyCode)
             return true
         }
-        return super.onKeyDown(keyCode, event)
+        return forwardHardwareEvent(e, down = true) != HardwareKeyHandlingResult.UNHANDLED
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        val e = event ?: return super.onKeyUp(keyCode, event)
         // 物理 Shift 单击（按下到抬起间无其他按键）切换中英文，与 PC 中文输入法习惯一致；
         // 复用软键盘 earth 键的 ime_switch 链路（USER_TOGGLE，会话级不持久化）。
         // 组合使用（Shift+字母等）时放行 super，不触发切换。
         if (isShiftKeyCode(keyCode) && !shiftComboDetected) {
             dispatchKey("ime_switch")
+            currentInputConnection?.clearMetaKeyStates(KeyEvent.META_SHIFT_ON)
+            consumedHardwareKeyCodes.remove(keyCode)
             return true
         }
-        return super.onKeyUp(keyCode, event)
+        if (consumedHardwareKeyCodes.remove(keyCode)) return true
+        return forwardHardwareEvent(e, down = false) != HardwareKeyHandlingResult.UNHANDLED
     }
 
     override fun sendKeyEvent(keyCode: Int) {
@@ -2019,6 +2079,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         // 保留实体键盘接管状态，避免发送后无触摸操作却重新弹出虚拟键盘。
         if (!restarting) {
             physicalKeyboardActive = false
+            consumedHardwareKeyCodes.clear()
         }
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         loadDarkModePreference()
@@ -2307,6 +2368,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         physicalKeyboardActive = false
+        consumedHardwareKeyCodes.clear()
         hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
             newConfig.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
         super.onConfigurationChanged(newConfig)

@@ -17,6 +17,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+internal fun classifyHardwareEnterResult(
+    rimeConsumed: Boolean,
+    hasCompositionAfterRouting: Boolean,
+): HardwareKeyHandlingResult = when {
+    rimeConsumed -> HardwareKeyHandlingResult.RIME_CONSUMED
+    hasCompositionAfterRouting -> HardwareKeyHandlingResult.IME_CONSUMED
+    else -> HardwareKeyHandlingResult.FORWARDED_TO_EDITOR
+}
+
 /**
  * 按键输入路由。
  *
@@ -24,6 +33,18 @@ import kotlinx.coroutines.withContext
  * 所有共享状态通过 service 引用访问（同模块 internal 成员）。
  */
 internal class ImeKeyRouter(private val service: XimeInputMethodService) {
+
+    private suspend fun replayHardwareFallback(
+        hardwareEvent: HardwareKeyEvent?,
+        onHardwareResult: (HardwareKeyHandlingResult) -> Unit,
+    ): Boolean {
+        val event = hardwareEvent ?: return false
+        val result = withContext(Dispatchers.Main) {
+            event.replayTo(service.currentInputConnection)
+        }
+        onHardwareResult(result)
+        return result == HardwareKeyHandlingResult.FORWARDED_TO_EDITOR
+    }
 
     private fun processKeyAtEditingCaret(keyCode: Int, mask: Int): com.kingzcheung.xime.rime.RimeProcessResult {
         val caret = service.editingCaretPos
@@ -63,12 +84,16 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
      * 处理实体键盘 Enter。物理按键保留原始 Return keysym 和 Shift mask，
      * 由 Rime/方案决定确认候选、上屏编码、上屏脚本文本或其他自定义行为。
      */
-    internal fun handleHardwareEnter(event: KeyEvent) {
+    internal fun handleHardwareEnter(
+        event: KeyEvent,
+        onResult: (HardwareKeyHandlingResult) -> Unit = {},
+    ) {
         val isShifted = event.isShiftPressed
         val state = service.uiState.value
         // 工具面板和快捷发送表单的 Enter 是宿主控件动作，不能交给主方案。
         if (state.toolPanelInputFocused || state.showQuickSendForm) {
             handleKeyPress("enter", isShifted)
+            onResult(HardwareKeyHandlingResult.IME_CONSUMED)
             return
         }
         if (state.isVoiceMode && state.voiceSticky) {
@@ -89,25 +114,34 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
             )
             val consumedByRime = result.committedText.isNotEmpty() ||
                 (result.processed && (hadComposition || result.inputText.isNotEmpty() || result.preeditText.isNotEmpty()))
+            val current = service.candidateState.value
+            val handlingResult = classifyHardwareEnterResult(consumedByRime, current.isComposing)
             if (consumedByRime) {
                 if (result.committedText.isNotEmpty()) {
                     withContext(Dispatchers.Main) { service.commitText(result.committedText) }
                 }
                 sendTransformedResult(result)
+                onResult(handlingResult)
             } else {
-                val current = service.candidateState.value
                 if (current.isComposing) {
                     commitComposingInput(current, service.uiState.value.currentSchemaId)
                     resetEnterLikeCandidates(service.uiState.value.currentSchemaId)
                 } else {
                     dispatchEditorEnter()
                 }
+                onResult(handlingResult)
             }
         }
         service.keyJobs.trySend(job)
     }
 
-    internal fun handleKeyPress(key: String, isShifted: Boolean) {
+    internal fun handleKeyPress(
+        key: String,
+        isShifted: Boolean,
+        isCapsLockOn: Boolean = false,
+        hardwareEvent: HardwareKeyEvent? = null,
+        onHardwareResult: (HardwareKeyHandlingResult) -> Unit = {},
+    ) {
         // 空键无任何按键语义，且下游 Rime 路由按 key[0] 取码，
         // 空串会越界崩溃（2026-09-14 真机实证：滑动手势 commit 值为空时触发）。
         if (key.isEmpty()) return
@@ -188,8 +222,8 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                             service.keyboardViewModel.keyboardState.value !is KeyboardLayoutState.CommonSymbol
                         if (isChineseMode && (isLetter || isRimeDigit)) {
                             // 面板内的字母、数字同样交给方案处理，提交文本经 commitText 重定向。
-                            val char = if (isShifted && isLetter) key.uppercase() else key
-                            val mask = if (isShifted && isLetter) KeyEvent.META_SHIFT_ON else 0
+                            val char = if ((isShifted || isCapsLockOn) && isLetter) key.uppercase() else key
+                            val mask = if ((isShifted || isCapsLockOn) && isLetter) KeyEvent.META_SHIFT_ON else 0
                             postRimeJob {
                                 val result = processKeyAtEditingCaret(char[0].code, mask)
                                 if (result.processed) {
@@ -198,12 +232,14 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                                     }
                                     sendTransformedResult(result)
                                 } else {
-                                    withContext(Dispatchers.Main) { service.commitText(char) }
+                                    if (!replayHardwareFallback(hardwareEvent, onHardwareResult)) {
+                                        withContext(Dispatchers.Main) { service.commitText(char) }
+                                    }
                                 }
                             }
                             return
                         }
-                        val char = if (isShifted) key.uppercase() else key
+                        val char = if (isShifted || isCapsLockOn) key.uppercase() else key
                         ToolPanelEditTextHolder.editText?.let { et ->
                             val start = et.selectionStart.coerceAtLeast(0)
                             et.text?.insert(start, char)
@@ -575,10 +611,10 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                     } else {
                         val isChinese = !state.isAsciiMode
                         val isLetter = key.matches(Regex("[a-zA-Z]"))
-                        val char = if (isChinese && isShifted && isLetter) key.uppercase() else key
+                        val char = if (isChinese && (isShifted || isCapsLockOn) && isLetter) key.uppercase() else key
                         // 中文保留字符大小写；英文继续使用小写键码 + Shift。
                         val keyCode = if (isChinese) char[0].code else key.lowercase()[0].code
-                        val mask = if (isShifted && isLetter) KeyEvent.META_SHIFT_ON else 0
+                        val mask = if ((isShifted || isCapsLockOn) && isLetter) KeyEvent.META_SHIFT_ON else 0
 
                         // 非 ASCII 可打印字符（全角符号/中文标点）：直接上屏，不进入 Rime 引擎。
                         // Rime processKey 只接受标准键码，全角键码（如 U+FF0F）无法识别会被静默
@@ -586,7 +622,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                         if (char.isNotEmpty() && char.any { it.code > 0x7E }) {
                             committedText = char
                             needsUIUpdate = true
-                        } else if (isShifted && !isLetter) {
+                        } else if ((isShifted || isCapsLockOn) && !isLetter) {
                             if (char.length == 1) {
                                 val charCode = char[0].code
                                 val result = processKeyAtEditingCaret(charCode, 0)
@@ -598,11 +634,15 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                                     }
                                     sendTransformedResult(result) { if (service.calculatorEngine.isActive()) updateCalculatorCandidates() }
                                 } else {
-                                    committedText = char
+                                    if (!replayHardwareFallback(hardwareEvent, onHardwareResult)) {
+                                        committedText = char
+                                    }
                                     needsUIUpdate = true
                                 }
                             } else {
-                                committedText = char
+                                if (!replayHardwareFallback(hardwareEvent, onHardwareResult)) {
+                                    committedText = char
+                                }
                                 needsUIUpdate = true
                             }
                         } else {
@@ -632,13 +672,15 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                                 val isAscii = state.isAsciiMode
                                 if (!candState.isComposing) {
                                                     if (isAscii) {
-                                                        val charToCommit = if (isShifted) char.uppercase() else char.lowercase()
+                                                        val charToCommit = if (isShifted || isCapsLockOn) char.uppercase() else char.lowercase()
                                                         val currentPending = candState.pendingEnglishText
                                                         val newPending = currentPending + charToCommit
                                                         // 英文直接上屏模式：字符不经 composing region，即输即落盘；
                                                         // pendingEnglishText 仅作编码记录（供联想与选中候选后回删替换校验）。
                                                         withContext(Dispatchers.Main) {
-                                                            service.commitText(charToCommit)
+                                                            if (!replayHardwareFallback(hardwareEvent, onHardwareResult)) {
+                                                                service.commitText(charToCommit)
+                                                            }
                                                         }
                                                         service.candidateState.value = service.candidateState.value.copy(
                                                             pendingEnglishText = newPending,
@@ -647,7 +689,9 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                                                         )
                                                         needsUIUpdate = true
                                     } else {
-                                        committedText = char
+                                        if (!replayHardwareFallback(hardwareEvent, onHardwareResult)) {
+                                            committedText = char
+                                        }
                                         needsUIUpdate = true
                                     }
                                 } else {
@@ -656,6 +700,8 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                                     } else {
                                         ""
                                     }
+                                    // 这里已经先从 Rime 取出候选提交文本；原始按键只能代表追加的字符，
+                                    // 不能回放整个事件来替代 candidateText + char，否则候选文本会丢失。
                                     committedText = candidateText + char
                                     needsUIUpdate = true
                                 }
