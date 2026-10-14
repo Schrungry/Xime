@@ -1,6 +1,5 @@
 package com.kingzcheung.xime.service
 
-import android.view.KeyEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalView
@@ -14,7 +13,6 @@ import com.kingzcheung.xime.ui.keyboard.FloatingCardGeometry
 import com.kingzcheung.xime.ui.keyboard.KeyboardCallbacks
 import com.kingzcheung.xime.ui.keyboard.isT9Schema
 import com.kingzcheung.xime.util.FileLogger
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -177,7 +175,7 @@ internal fun rememberImeKeyboardCallbacks(
                         service.feedbackManager.performVibration()
                     }
                     service.endVoiceSession()
-                } else if (!service.uiState.value.isVoiceMode) {
+                } else if (SettingsPreferences.isSttEnabled(service) && !service.uiState.value.isVoiceMode) {
                     service.uiState.value = service.uiState.value.copy(
                         isVoiceMode = true,
                         voiceSticky = false,
@@ -200,7 +198,7 @@ internal fun rememberImeKeyboardCallbacks(
                 if (state.isVoiceMode && state.voiceSticky) {
                     // 常驻语音中：点按空格/再次点击工具栏即结束
                     service.endVoiceSession()
-                } else if (!state.isVoiceMode) {
+                } else if (SettingsPreferences.isSttEnabled(service) && !state.isVoiceMode) {
                     // 进入常驻语音：保持正常键盘布局，候选栏显示频谱，空格键轻触结束
                     service.uiState.value = service.uiState.value.copy(
                         isVoiceMode = true,
@@ -224,44 +222,8 @@ internal fun rememberImeKeyboardCallbacks(
             onRequestExpandedCandidates = { service.refreshExpandedCandidates() },
             onCursorMove = { direction ->
                 if (direction != 0) {
-                    if (service.candidateState.value.isComposing &&
-                        !isT9Schema(service.uiState.value.currentSchemaId)
-                    ) {
-                        // 组合态（仅全键盘）：滑动移动宿主编辑光标；路由层在下一次
-                        // 按键处理前同步给 Rime，处理后恢复末尾以生成整串候选。
-                        // 上屏（空闲态）后滑动走下方编辑器光标逻辑
-                        val input = service.rimeEngine.getInput()
-                        if (input.isNotEmpty()) {
-                            val base = if (service.editingCaretPos < 0) input.length else service.editingCaretPos
-                            val target = (base + direction).coerceIn(0, input.length)
-                            service.editingCaretPos = if (target >= input.length) -1 else target
-                            // 编码快照供 displayCaretOffset 失同步自愈比对
-                            service.editingCaretInput = if (service.editingCaretPos >= 0) input else ""
-                            service.updateUI()
-                        }
-                    } else {
-                        val ic = service.currentInputConnection
-                        if (ic != null) {
-                            var movedBySelection = false
-                            try {
-                                val req = android.view.inputmethod.ExtractedTextRequest()
-                                val extracted = ic.getExtractedText(req, 0)
-                                if (extracted != null && extracted.selectionStart >= 0) {
-                                    val newPos = (extracted.selectionStart + direction)
-                                        .coerceIn(0, extracted.text?.length ?: 0)
-                                    ic.setSelection(newPos, newPos)
-                                    movedBySelection = true
-                                }
-                            } catch (_: Exception) {}
-                            if (!movedBySelection) {
-                                val keyCode = if (direction < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
-                                repeat(abs(direction)) {
-                                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
-                                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
-                                }
-                            }
-                        }
-                    }
+                    // 组合态移编码编辑光标 / 空闲态移编辑器光标，与光标键动作同一路径
+                    service.moveCursor(direction)
                 }
             },
             onGestureAction = { action, value ->
