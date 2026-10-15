@@ -77,8 +77,16 @@ if(IS_SYMLINK "${CORRECTION_PLUGIN_LINK}")
 elseif(EXISTS "${CORRECTION_PLUGIN_LINK}")
   file(REMOVE_RECURSE "${CORRECTION_PLUGIN_LINK}")
 endif()
-file(CREATE_LINK "../../librime-correction"
+set(CORRECTION_PLUGIN_TARGET "../../librime-correction")
+if(CMAKE_HOST_WIN32)
+  set(CORRECTION_PLUGIN_TARGET "${CMAKE_SOURCE_DIR}/librime-correction")
+endif()
+file(CREATE_LINK "${CORRECTION_PLUGIN_TARGET}"
      "${CORRECTION_PLUGIN_LINK}" SYMBOLIC)
+if(NOT IS_DIRECTORY "${CORRECTION_PLUGIN_LINK}" OR
+   NOT EXISTS "${CORRECTION_PLUGIN_LINK}/CMakeLists.txt")
+  message(FATAL_ERROR "Correction plugin directory link is invalid: ${CORRECTION_PLUGIN_LINK}")
+endif()
 
 # librime-lua 需要特殊命名 lua
 file(COPY "${CMAKE_SOURCE_DIR}/librime-lua/"
