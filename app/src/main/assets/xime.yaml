@@ -478,6 +478,14 @@ keyboard:
     # compact: 紧凑布局（主文字在左上，下滑提示占满键帽中部）
     button_layout: standard
     layout:
+      # ── 行宽与对齐（均可选，写在 layout 下作用于整段键盘）──
+      # columns:   参考列数，缺省取首行键数；uniform 下决定行宽与键宽
+      # row_align: uniform（默认）= 键宽按列对齐、行居中；stretch = 行内均分铺满
+      # 行可写成数组（继承键盘级策略），或对象形式做行级覆盖：
+      #   - { keys: [a, s, d, f, g, h, j, k, l], align: stretch }   # 该行满宽均分
+      #   - { keys: [z, x, c, v, b, n, m], width: 0.7 }             # 该行占 70% 宽（居中）
+      # columns: 10
+      # row_align: uniform
       rows:
         - [q, w, e, r, t, y, u, i, o, p]
         - [a, s, d, f, g, h, j, k, l]
@@ -544,6 +552,14 @@ keyboard:
     # compact: 紧凑布局（主文字在左上，下滑提示占满键帽中部）
     button_layout: standard
     layout:
+      # ── 行宽与对齐（均可选，写在 layout 下作用于整段键盘）──
+      # columns:   参考列数，缺省取首行键数；uniform 下决定行宽与键宽
+      # row_align: uniform（默认）= 键宽按列对齐、行居中；stretch = 行内均分铺满
+      # 行可写成数组（继承键盘级策略），或对象形式做行级覆盖：
+      #   - { keys: [a, s, d, f, g, h, j, k, l], align: stretch }   # 该行满宽均分
+      #   - { keys: [z, x, c, v, b, n, m], width: 0.7 }             # 该行占 70% 宽（居中）
+      # columns: 10
+      # row_align: uniform
       rows:
         - [q, w, e, r, t, y, u, i, o, p]
         - [a, s, d, f, g, h, j, k, l]
@@ -732,6 +748,8 @@ keyboard:
     schemas: [pinyin_14jian]
     button_layout: standard
     layout:
+      # 合并键布局按各行键数铺满（行短于首行也不居中），保持既有观感
+      row_align: stretch
       rows:
         - [[q, w], [e, r], [t, y], [u, i], [o, p]]
         - [[a, s], [d, f], [g, h], [j, k], [l]]
@@ -760,6 +778,8 @@ keyboard:
     schemas: [pinyin_17jian]
     button_layout: standard
     layout:
+      # 合并键布局按各行键数铺满（行短于首行也不居中），保持既有观感
+      row_align: stretch
       rows:
         - [q, [w, e], [r, t], [y, u], i, [o, p]]
         - [a, [s, d], [f, g], h, [j, k], l]
@@ -791,6 +811,8 @@ keyboard:
     schemas: [pinyin_18jian]
     button_layout: standard
     layout:
+      # 合并键布局按各行键数铺满（行短于首行也不居中），保持既有观感
+      row_align: stretch
       rows:
         - [q, [w, e], [r, t], y, u, [i, o], p]
         - [a, [s, d], [f, g], h, [j, k], l]
@@ -827,8 +849,9 @@ keyboard:
     type: t9
     schemas: [t9_pinyin, t9, wanxiang_t9, rime_frost_t9]
     # ── 布局（三列结构，可完全自定义；未配置时为以下内置默认，与历史布局一致）──
-    # left：左列（自上而下）。candidates = 拼音候选面板占位（候选态显示音节，
-    #   空闲态显示下方 side_symbols）；也可放功能键或自定义键。
+    # left：左列（自上而下）。candidates 是候选/符号面板占位（不是可提交的按键）：
+    #   候选态显示音节选项（点选音节），空闲态显示下方 side_symbols
+    #   （固定 4 等分高度，>4 个可上下滚动）。也可放功能键或自定义键。
     # rows：主区（中间列）按行，每行一个键 id 列表。
     # right：右列（自上而下）。
     # 键 id 分三类：
@@ -859,6 +882,7 @@ keyboard:
       - "。"
       - "？"
       - "！"
+      - "%"
     # ── 数字键手势（可自定义：在 xime.custom.yaml 的 keyboard.t9.keys 同路径覆盖）──
     # 键 id 为数字字符串 "1"~"9"（也可为 layout 中出现的自定义键 id）。
     # 内置默认：上滑直接输入键面数字（无需切数字键盘）；下滑/左滑/右滑内置不绑定动作，
