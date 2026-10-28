@@ -2186,8 +2186,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         val e = event ?: return super.onKeyUp(keyCode, event)
         // 物理 Shift 单击（按下到抬起间无其他按键）切换中英文，与 PC 中文输入法习惯一致；
         // 复用软键盘 earth 键的 ime_switch 链路（USER_TOGGLE，会话级不持久化）。
-        // 组合使用（Shift+字母等）时放行 super，不触发切换。
-        if (isShiftKeyCode(keyCode) && !shiftComboDetected) {
+        // 组合使用（Shift+字母等）时放行 super；CapsLock 按住时按 Shift 是换挡意图，不切。
+        if (isShiftKeyCode(keyCode) && !shiftComboDetected && !e.isCapsLockOn) {
             dispatchKey("ime_switch")
             currentInputConnection?.clearMetaKeyStates(KeyEvent.META_SHIFT_ON)
             consumedHardwareKeyCodes.remove(keyCode)
@@ -2697,7 +2697,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         updateCursorUpdateMonitoring()
         if (localeChanged) {
             // 系统语言变化：刷新全局取词并重建键盘，Compose 才能取到新语言资源
-            com.kingzcheung.xime.i18n.UiText.init(AppLocale.wrap(this, newConfig))
+            com.kingzcheung.xime.i18n.UiText.init(AppLocale.wrap(this))
             if (isInputViewShown) setInputView(onCreateInputView())
         }
     }

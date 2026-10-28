@@ -34,4 +34,36 @@ class KeyCodeMapperTest {
         assertEquals("8", keyCodeToKey(KeyEvent.KEYCODE_8, false))
         assertEquals("=", keyCodeToKey(KeyEvent.KEYCODE_EQUALS, false))
     }
+
+    @Test
+    fun `CapsLock只影响字母大小写`() {
+        for (keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
+            val lower = ('a' + keyCode - KeyEvent.KEYCODE_A).toString()
+            assertEquals(lower, keyCodeToKey(keyCode, false, false))
+            assertEquals(lower.uppercase(), keyCodeToKey(keyCode, true, false))
+            assertEquals(lower.uppercase(), keyCodeToKey(keyCode, false, true))
+        }
+    }
+
+    @Test
+    fun `CapsLock不会把数字和标点变成Shift符号`() {
+        val keys = (KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9).toList() + listOf(
+            KeyEvent.KEYCODE_COMMA, KeyEvent.KEYCODE_PERIOD, KeyEvent.KEYCODE_MINUS,
+            KeyEvent.KEYCODE_EQUALS, KeyEvent.KEYCODE_SLASH, KeyEvent.KEYCODE_BACKSLASH,
+            KeyEvent.KEYCODE_SEMICOLON, KeyEvent.KEYCODE_APOSTROPHE,
+            KeyEvent.KEYCODE_LEFT_BRACKET, KeyEvent.KEYCODE_RIGHT_BRACKET, KeyEvent.KEYCODE_GRAVE,
+            KeyEvent.KEYCODE_PLUS, KeyEvent.KEYCODE_STAR,
+            KeyEvent.KEYCODE_NUMPAD_ADD, KeyEvent.KEYCODE_NUMPAD_MULTIPLY,
+            KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_TAB,
+        )
+        for (keyCode in keys) {
+            for (shift in listOf(false, true)) {
+                assertEquals(
+                    "keyCode=$keyCode shift=$shift",
+                    keyCodeToKey(keyCode, shift, false),
+                    keyCodeToKey(keyCode, shift, true),
+                )
+            }
+        }
+    }
 }
