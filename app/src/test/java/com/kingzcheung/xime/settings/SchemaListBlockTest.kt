@@ -83,9 +83,36 @@ class SchemaListBlockTest {
     }
 
     @Test
-    fun `empty enabled list leaves text unchanged`() {
+    fun `empty enabled list clears schema_list`() {
         val result = SchemaManager.replaceSchemaListBlock(defaultYaml, emptyList())
-        assertEquals(defaultYaml, result)
+        assertEquals(emptyList<String>(), extractSchemaList(result))
+        assertTrue(result.contains("schema_list: []"))
+        assertTrue(result.contains("config_version"))
+    }
+
+    @Test
+    fun `empty then non-empty keeps a single schema_list block`() {
+        val cleared = SchemaManager.replaceSchemaListBlock(defaultYaml, emptyList())
+        val result = SchemaManager.replaceSchemaListBlock(cleared, listOf("wubi86"))
+        assertEquals(1, Regex("(?m)^schema_list:").findAll(result).count())
+        assertEquals(listOf("wubi86"), extractSchemaList(result))
+    }
+
+    @Test
+    fun `writing empty twice stays a single empty block`() {
+        val once = SchemaManager.replaceSchemaListBlock(defaultYaml, emptyList())
+        val twice = SchemaManager.replaceSchemaListBlock(once, emptyList())
+        assertEquals(1, Regex("(?m)^schema_list:").findAll(twice).count())
+        assertEquals(emptyList<String>(), extractSchemaList(twice))
+    }
+
+    @Test
+    fun `dedupes duplicate schema_list blocks from earlier writes`() {
+        val duplicated = defaultYaml + "\n\nschema_list:\n  - schema: quick5\n"
+        val result = SchemaManager.replaceSchemaListBlock(duplicated, listOf("wubi86"))
+        assertEquals(1, Regex("(?m)^schema_list:").findAll(result).count())
+        assertEquals(listOf("wubi86"), extractSchemaList(result))
+        assertTrue(result.contains("switcher:"))
     }
 
     @Test
@@ -106,40 +133,40 @@ class SchemaListBlockTest {
         assertTrue(result.contains("switcher:"))
     }
 
-    // ---- mergeBuiltinSchemas：老版本升级用户的内置方案补齐 ----
+    // ---- parseSchemaListBlock：读取方案包 default.yaml 的开箱启用集 ----
 
     @Test
-    fun `老列表缺新内置方案时补到尾部`() {
-        // 老版本只有三个方案：升级后 t9_pinyin 从未部署，切九键静默失败
-        val enabled = listOf("wubi86", "wubi86_pinyin", "pinyin_simp")
-        val merged = SchemaManager.mergeBuiltinSchemas(enabled)
+    fun `解析白霜包 default_yaml 的 schema_list`() {
+        val text = """
+            schema_list:
+              - schema: rime_frost             # 白霜拼音（全拼）
+              - schema: rime_frost_double_pinyin_mspy
+              - schema: rime_frost_t9
+              # - schema: rime_frost_double_pinyin_abc
+              - schema: rime_frost_wubi86
+
+            menu:
+              page_size: 8
+        """.trimIndent()
         assertEquals(
-            listOf("wubi86", "wubi86_pinyin", "pinyin_simp", "t9_pinyin"),
-            merged,
+            listOf(
+                "rime_frost",
+                "rime_frost_double_pinyin_mspy",
+                "rime_frost_t9",
+                "rime_frost_wubi86",
+            ),
+            SchemaManager.parseSchemaListBlock(text),
         )
     }
 
     @Test
-    fun `内置方案齐全时原样返回`() {
-        val enabled = listOf("wubi86", "wubi86_pinyin", "pinyin_simp", "t9_pinyin")
-        assertEquals(enabled, SchemaManager.mergeBuiltinSchemas(enabled))
+    fun `解析时忽略注释与引号`() {
+        val text = "schema_list:\n  - schema: \"a\" # x\n  - schema: 'b'\n"
+        assertEquals(listOf("a", "b"), SchemaManager.parseSchemaListBlock(text))
     }
 
     @Test
-    fun `用户顺序与第三方方案保持不变`() {
-        val enabled = listOf("my_custom_schema", "pinyin_simp", "wubi86")
-        val merged = SchemaManager.mergeBuiltinSchemas(enabled)
-        assertEquals(
-            listOf("my_custom_schema", "pinyin_simp", "wubi86", "wubi86_pinyin", "t9_pinyin"),
-            merged,
-        )
-    }
-
-    @Test
-    fun `空列表补齐全量内置方案`() {
-        assertEquals(
-            SchemaManager.BUILTIN_SCHEMAS,
-            SchemaManager.mergeBuiltinSchemas(emptyList()),
-        )
+    fun `没有 schema_list 时返回空`() {
+        assertTrue(SchemaManager.parseSchemaListBlock("menu:\n  page_size: 8\n").isEmpty())
     }
 }

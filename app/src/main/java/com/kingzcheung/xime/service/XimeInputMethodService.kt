@@ -112,6 +112,7 @@ import com.kingzcheung.xime.settings.AppLocale
 import com.kingzcheung.xime.settings.SchemaConfigHelper
 import com.kingzcheung.xime.settings.SchemaManager
 import com.kingzcheung.xime.settings.SettingsPreferences
+import com.kingzcheung.xime.scheme.SchemeStore
 import com.kingzcheung.xime.settings.SyncManager
 import com.kingzcheung.xime.ui.keyboard.KeyboardView
 import com.kingzcheung.xime.ui.keyboard.isT9Schema
@@ -773,34 +774,23 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 notifyDeploymentStatus(true, tr(R.string.s_zhengzaijiazaishurufayinqing))
                 rimeEngine.initialize(userDataDir, sharedDataDir)
 
-                // 检查词库是否已部署（deploymentDone 标记 + 部署 hash 一致）
-                val deploymentDone = SettingsPreferences.isDeploymentDone(this@XimeInputMethodService)
-                val needsDeployment = !deploymentDone || !RimeConfigHelper.isDeploymentComplete(this@XimeInputMethodService)
-
-                if (needsDeployment) {
-                    // 统一部署入口（进程内互斥，hash 一致时内部跳过）。
-                    // 与 XimeApplication 预初始化共享，避免两者并发触发两次全量编译。
+                // 冷启动自检：每进程一次；首次安装/产物缺失时内部自动升级为
+                // fullCheck 维护，无改动时按顶层 yaml 的 mtime 立即返回。
+                // 只有确实缺产物时才提示“正在编译词库”，避免每次冷启动闪一下遮罩。
+                val needsBuild = !RimeConfigHelper.isDeploymentComplete(this@XimeInputMethodService)
+                if (needsBuild) {
                     notifyDeploymentStatus(true, tr(R.string.s_zhengzaibianyiciku))
-                    if (RimeConfigHelper.ensureDeployment(this@XimeInputMethodService)) {
-                        rimeEngine.updateLastBuildTime()
-                    } else {
-                        FileLogger.e(TAG, "initRimeEngine: ensureDeployment failed, deployment may not have completed")
-                    }
-                } else {
-                    Log.d(TAG, "initRimeEngine: Already deployed, creating session directly")
+                }
+                if (!RimeConfigHelper.ensureDeployment(this@XimeInputMethodService)) {
+                    FileLogger.e(TAG, "initRimeEngine: ensureDeployment failed, deployment may not have completed")
                 }
 
-                // 创建 session（已部署时跳过 maintenance 直接创建）
+                // 部署末尾已重建会话；这里只兜底等待（维护超时/引擎未就绪场景）
                 val sessionReady = rimeEngine.ensureSession(180_000L)
                 if (sessionReady) {
                     Log.d(TAG, "initRimeEngine: Session ready")
-                    // 确保部署成功后才标记完成，避免首次部署超时后误标记
-                    if (needsDeployment) {
-                        SettingsPreferences.setDeploymentDone(this@XimeInputMethodService, true)
-                        RimeConfigHelper.storeDeploymentHash(this@XimeInputMethodService)
-                    }
                 } else {
-                    FileLogger.w(TAG, "initRimeEngine: Session not ready after 60s, continuing in background")
+                    FileLogger.w(TAG, "initRimeEngine: Session not ready after 180s, continuing in background")
                 }
                 notifyDeploymentStatus(false, "")
 
@@ -874,7 +864,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                             Log.d(TAG, "initRimeEngine: savedSchema '$savedSchema' not available, falling back to '$fallbackSchema'")
                             schemaController.applyPageSizeSetting(fallbackSchema)
                             rimeEngine.switchSchema(fallbackSchema)
-                            SettingsPreferences.setCurrentSchema(this@XimeInputMethodService, fallbackSchema)
+                            SchemeStore.setCurrent(this@XimeInputMethodService, fallbackSchema)
                         }
                     }
                     
@@ -2345,7 +2335,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                             }
                             schemaController.applyPageSizeSetting(fallbackSchema)
                             rimeEngine.switchSchema(fallbackSchema)
-                            SettingsPreferences.setCurrentSchema(this, fallbackSchema)
+                            SchemeStore.setCurrent(this, fallbackSchema)
                             actualSchema = fallbackSchema
                         } else {
                             debugLog("onStartInput: saved schema is handwriting, keeping handwriting mode")
@@ -2381,7 +2371,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                         debugLog("onStartInput: savedSchema '$savedSchema' not available, falling back to '$fallbackSchema'")
                         schemaController.applyPageSizeSetting(fallbackSchema)
                         rimeEngine.switchSchema(fallbackSchema)
-                        SettingsPreferences.setCurrentSchema(this, fallbackSchema)
+                        SchemeStore.setCurrent(this, fallbackSchema)
                         actualSchema = fallbackSchema
                     }
                     else -> actualSchema = savedSchema
@@ -2937,12 +2927,6 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         }
         inputBoxComposingActive = false
     }
-
-    /**
-     * 当前输入框是否受限（密码/终端/NO_SUGGESTIONS，见 EditorInfoClassifier）：
-     * 英文联想等补全类功能应短路。
-     */
-    internal fun isEditorRestricted(): Boolean = editorRestricted
 
     internal fun isSecretEditor(): Boolean = editorSecret
 

@@ -17,10 +17,11 @@ import com.kingzcheung.xime.settings.KeysConfigHelper
 import com.kingzcheung.xime.settings.SchemaConfigHelper
 import com.kingzcheung.xime.settings.SchemaManager
 import com.kingzcheung.xime.rime.RimeConfigHelper
+import com.kingzcheung.xime.scheme.SchemeDeployer
+import com.kingzcheung.xime.scheme.SchemeStore
 import com.kingzcheung.xime.settings.SettingsPreferences
 import com.kingzcheung.xime.ui.theme.KeyboardThemes
 import com.kingzcheung.xime.util.FileLogger
-import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -28,19 +29,19 @@ import kotlinx.coroutines.withContext
 /**
  * 方案管理与输入模式切换。
  *
- * 承载方案切换（switchSchema/applyPageSizeSetting）、部署（reloadConfig/deploy/deploySchema/downloadSchema）、
+ * 承载方案切换（switchSchema/applyPageSizeSetting）、部署（reloadConfig）、
  * 工具栏编辑动作、键盘高度与浮动模式调整。
  * 中英切换已收敛至 [AsciiModeController]。
  * 共享状态通过 service 引用访问。
  */
 internal class ImeSchemaController(private val service: XimeInputMethodService) {
     internal fun reloadConfig() {
-        
+
         service.mainHandler.post {
             service.requestHideSelf(0)
             android.widget.Toast.makeText(service, tr(R.string.s_fanganbushuzhong), android.widget.Toast.LENGTH_SHORT).show()
         }
-        
+
         // 部署投递到 key-processing 队列：与按键/切换同队列串行执行，
         // 部署期间输入/切换操作排队等待，完成后自动恢复，
         // 不再因 rimeLock 被部署占用而失败或静默丢弃。
@@ -49,39 +50,41 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
                 KeysConfigHelper.loadConfig(service)
                 // 重新加载配色方案（用户可能在 xime.custom.yaml 中修改了 color_schemes）
                 KeyboardThemes.reload(service)
-                
-                val userDataDir = File(service.filesDir, "rime")
-                
-                // 清空 build 目录，强制 Rime 全量重新编译
-                val buildDir = File(userDataDir, "build")
-                if (buildDir.exists()) {
-                    buildDir.deleteRecursively()
-                }
-                
-                service.rimeEngine.deploy()
-                // 部署后记录 hash 与完成标记，否则下次启动会因 hash 不一致再次全量编译
-                RimeConfigHelper.storeDeploymentHash(service)
-                SettingsPreferences.setDeploymentDone(service, true)
-                
+
+                // 统一部署入口（设置页/键盘菜单/安装替换同一条路径）：
+                // 内部会镜像 schema_list、补个人词库、重启维护并在维护前后重建会话。
+                val result = SchemeDeployer.deploy(service)
+                val deployed = result.ok
+                val missing = RimeConfigHelper.missingCompiledSchemaNames(service)
+
                 // 部署完成后重新加载配置（Rime 可能在部署过程中改写文件）
                 KeysConfigHelper.loadConfig(service)
                 KeyboardThemes.reload(service)
-                
+
                 val availableSchemas = service.rimeEngine.getAvailableSchemas()
-                
+
                 val savedSchema = SettingsPreferences.getCurrentSchema(service)
+                // 部署刚结束，get_schema_list 就是本次部署的结果，直接按它判定。
                 if (savedSchema in availableSchemas) {
                     applyPageSizeSetting(savedSchema)
                     service.rimeEngine.switchSchema(savedSchema)
                 } else {
-                    FileLogger.w(XimeInputMethodService.TAG, "Schema $savedSchema not found in available schemas")
+                    FileLogger.w(
+                        XimeInputMethodService.TAG,
+                        "Schema $savedSchema not in deployed schema_list, " +
+                            "available=${availableSchemas.joinToString()}"
+                    )
                 }
-                
+
                 // 直接在 key-processing 线程同步读取 name，避免嵌套协程的时序问题
                 val currentSchemaId = service.rimeEngine.getCurrentSchema()
                 val schemaName = SchemaManager.getSchemaDisplayName(
                     service, currentSchemaId
                 ) ?: currentSchemaId
+
+                // 部署会重建 build/，方案列表（含「已编译」过滤）必须重新查询，
+                // 否则菜单仍显示部署前的旧快照。
+                service.sessionController.updateSchemaName()
 
                 withContext(Dispatchers.Main) {
                     service.uiState.value = service.uiState.value.copy(
@@ -89,34 +92,20 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
                         currentSchemaId = currentSchemaId,
                     )
                     service.updateUI()
-                    android.widget.Toast.makeText(service, tr(R.string.s_fanganbushuwancheng), android.widget.Toast.LENGTH_SHORT).show()
+                    val message = when {
+                        !deployed -> tr(R.string.s_bushushibai)
+                        missing.isNotEmpty() ->
+                            tr(R.string.s_bushushibai_fanganweibianyi, missing.joinToString("、"))
+                        else -> tr(R.string.s_fanganbushuwancheng)
+                    }
+                    android.widget.Toast.makeText(service, message, android.widget.Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 FileLogger.e(XimeInputMethodService.TAG, "Failed to reload config", e)
             }
         }
     }
-    
-    private fun deploySchema() {
-        try {
-            service.rimeEngine.deploy()
-            // 部署后记录 hash 与完成标记，避免下次启动再次全量编译
-            RimeConfigHelper.storeDeploymentHash(service)
-            SettingsPreferences.setDeploymentDone(service, true)
-            val savedSchema = SettingsPreferences.getCurrentSchema(service)
-            applyPageSizeSetting(savedSchema)
-            service.rimeEngine.switchSchema(savedSchema)
-            val currentSchemaId = service.rimeEngine.getCurrentSchema()
-            service.uiState.value = service.uiState.value.copy(
-                schemaName = SchemaManager.getSchemaDisplayName(service, currentSchemaId) ?: currentSchemaId,
-                currentSchemaId = currentSchemaId,
-            )
-            service.updateUI()
-        } catch (e: Exception) {
-            FileLogger.e(XimeInputMethodService.TAG, "Failed to deploy schema", e)
-        }
-    }
-    
+
     internal fun openSettings() {
         try {
             val intent = Intent(service, MainActivity::class.java)
@@ -236,7 +225,7 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
                 return
             }
             service.previousSchemaId = service.rimeEngine.getCurrentSchema()
-            SettingsPreferences.setCurrentSchema(service, schemaId)
+            SchemeStore.setCurrent(service, schemaId)
             service.keyboardViewModel.switchMain(com.kingzcheung.xime.keyboard.MainType.HANDWRITING)
             // 手写模型按"用键盘时加载"管理：切到手写方案即展示手写键盘，
             // 由 HandwritingKeyboardLayout 创建时（LaunchedEffect）负责加载，
@@ -248,7 +237,7 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
         com.kingzcheung.xime.handwriting.HandwritingEngine.release()
         service.keyboardViewModel.switchMain(com.kingzcheung.xime.keyboard.MainType.FULL)
         try {
-            SettingsPreferences.setCurrentSchema(service, schemaId)
+            SchemeStore.setCurrent(service, schemaId)
             // 用户自定义候选词数：先写 custom.yaml 再切方案，Rime 会自动加载
             applyPageSizeSetting(schemaId)
             // 部署/编译进行中 switchSchema 返回 false（不阻塞等待），
@@ -266,7 +255,7 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
                 // IME 重启的恢复逻辑兜底，避免把空串写进偏好与 user.yaml
                 val actual = service.rimeEngine.getCurrentSchema()
                 if (actual.isNotEmpty()) {
-                    SettingsPreferences.setCurrentSchema(service, actual)
+                    SchemeStore.setCurrent(service, actual)
                 }
                 FileLogger.w(XimeInputMethodService.TAG, "switchSchema failed: target=$schemaId actual=$actual")
                 Toast.makeText(service, tr(R.string.s_fanganweibushu_qingzaifangangu_63cf5), Toast.LENGTH_SHORT).show()
@@ -304,35 +293,6 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
                 service.notifyDeploymentStatus(false, "")
             }
         }
-    }
-    
-    private fun deploy() {
-        // 部署投递到 key-processing 队列，与输入/切换串行执行，避免持锁饿死输入
-        service.keyRouter.postRimeJob {
-            // 部署前刷新手势配置和配色方案缓存
-            KeysConfigHelper.loadConfig(service)
-            KeyboardThemes.reload(service)
-            
-            service.notifyDeploymentStatus(true, tr(R.string.s_zhengzaibushu))
-            // 先补齐内置基础文件（symbols/default 等），避免方案 __include 失败导致编译报错
-            RimeConfigHelper.ensureBuiltinBaseFiles(service)
-
-            val success = service.rimeEngine.deploy()
-            
-            withContext(Dispatchers.Main) {
-                if (success) {
-                    Toast.makeText(service, tr(R.string.s_bushuchenggong), Toast.LENGTH_SHORT).show()
-                    service.updateUI()
-                } else {
-                    Toast.makeText(service, tr(R.string.s_bushushibai), Toast.LENGTH_SHORT).show()
-                }
-                service.notifyDeploymentStatus(false, "")
-            }
-        }
-    }
-    
-    private fun updateKeyboardHeightPreview(heightDp: Int) {
-        service.keyboardContainer.updateHeight(heightDp)
     }
     
     internal fun setKeyboardHeight(heightDp: Int) {
