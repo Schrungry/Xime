@@ -11,6 +11,7 @@ import android.util.Log
 import com.kingzcheung.xime.scheme.SchemeArchive
 import com.kingzcheung.xime.scheme.SchemeFiles
 import com.kingzcheung.xime.scheme.SchemeInstaller
+import com.kingzcheung.xime.scheme.SchemePackages
 import com.kingzcheung.xime.scheme.SchemeStore
 import com.kingzcheung.xime.util.FileLogger
 import com.kingzcheung.xime.rime.RimeConfigHelper
@@ -108,13 +109,17 @@ object SchemaManager {
         return dir.exists() && (dir.listFiles()?.any { it.isFile } == true)
     }
 
-    /** 删除 market 中指定方案的整个子目录（含压缩包），并清理本地版本记录。 */
+    /** 删除 market 中指定方案的整个子目录（含压缩包），并清理本地版本记录与包信息。 */
     fun deleteSchemeArchive(context: Context, schemeId: String): Boolean {
         val dir = getMarketDir(context, schemeId)
         val removed = if (!dir.exists()) false else dir.deleteRecursively()
         if (removed) {
             MarketVersionStore.removeSchemeVersion(context, schemeId)
         }
+        // 包信息（名称/版本）必须一起清：否则条目仍由 scheme_package_info 留在列表里，
+        // 既非已安装也非已下载，UI 只能显示「未知」。
+        SchemePackages.forget(context, schemeId)
+        SchemeStore.invalidate()
         return removed
     }
 

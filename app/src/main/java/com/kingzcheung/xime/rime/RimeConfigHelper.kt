@@ -30,6 +30,8 @@ object RimeConfigHelper {
     private const val BUILTIN_MARKET_ID = "builtin"
     /** 内置方案集的初始占位版本：`0.0.0` 保证不等于任何真实 git tag，从而在市场提示「更新」。 */
     private const val BUILTIN_PLACEHOLDER_VERSION = "0.0.0"
+    /** 用户配置 BOM 扫描上限：词典等大文件不参与（体积大且不应被编辑器改写）。 */
+    private const val BOM_SCAN_MAX_BYTES = 4L * 1024 * 1024
 
     /** 部署互斥：Application 预初始化与输入法服务初始化可能并发触发部署，串行化避免重复/并发全量编译。 */
     private val deploymentLock = Any()
@@ -65,12 +67,22 @@ object RimeConfigHelper {
      * - hash 缺失/不一致 → 优先增量维护（librime 按文件时间戳只编译变更），
      *   仅当 build 缺失/为空或增量失败时才清空全量编译。
      *
+     * @param alwaysMaintain 用户主动点「部署」时为 true：即使 hash 一致也跑一次维护。
+     *   hash 只覆盖部分配置文件，用户改动 hash 之外的文件（include 的自定义 yaml 等）
+     *   时，短路会让「部署」看起来没有生效。
+     *
      * 必须由调用方保证 engine 已 initialize（deploy() 未初始化时返回 false）。
      * 该入口被 Application 预初始化与输入法服务共享，配合 deploymentLock
      * 避免两者并发触发两次全量编译。
      */
-    fun ensureDeployment(context: Context): Boolean {
+    fun ensureDeployment(context: Context, alwaysMaintain: Boolean = false): Boolean {
         synchronized(deploymentLock) {
+            // 外部编辑器保存 YAML 可能写入 UTF-8 BOM，librime 的解析器不会跳过 BOM，
+            // 整份配置会解析失败（部署后方案无产物、打字无候选），部署前统一清掉。
+            val bomFixed = stripBomFromUserYaml(File(context.filesDir, "rime"))
+            if (bomFixed > 0) {
+                FileLogger.w(TAG, "Stripped UTF-8 BOM from $bomFixed yaml file(s) before deploy")
+            }
             // 刚补回基础文件：旧 hash 与产物已不可信，强制重编
             if (ensureBuiltinBaseFiles(context) > 0) SettingsPreferences.setDeploymentHash(context, "")
             val currentHash = computeDeploymentHash(context)
@@ -78,7 +90,8 @@ object RimeConfigHelper {
             // 旧逻辑因此会把「部分方案未编译」当成已部署永久跳过。这里要求产物
             // 也齐全，缺失时继续走维护流程重编。
             val missing = missingCompiledSchemas(context)
-            if (currentHash.isNotEmpty() &&
+            if (!alwaysMaintain &&
+                currentHash.isNotEmpty() &&
                 currentHash == SettingsPreferences.getDeploymentHash(context) &&
                 missing.isEmpty()
             ) {
@@ -88,7 +101,12 @@ object RimeConfigHelper {
             if (missing.isNotEmpty()) {
                 FileLogger.w(TAG, "Missing build artifacts for enabled schemas: ${missing.joinToString()}")
             }
-            Log.i(TAG, "Deployment hash mismatch or missing")
+            Log.i(
+                TAG,
+                "Deploying: alwaysMaintain=$alwaysMaintain, " +
+                    "hashChanged=${currentHash != SettingsPreferences.getDeploymentHash(context)}, " +
+                    "missing=${missing.size}",
+            )
             val buildDir = File(context.filesDir, "rime/build")
             val buildExists = buildDir.exists() && buildDir.listFiles()?.isNotEmpty() == true
             val engine = RimeEngine.getInstance()
@@ -148,6 +166,34 @@ object RimeConfigHelper {
             }
             return false
         }
+    }
+
+    /**
+     * 去掉用户 YAML 的 UTF-8 BOM，返回实际改写的文件数。
+     *
+     * 文件管理器/记事本类编辑器保存时可能写入 BOM，librime 的 YAML 解析不跳过 BOM，
+     * 整份配置会解析失败，表现为部署后方案没有编译产物（打字无候选）。
+     * 幂等：无 BOM 不写盘；只扫根目录配置，跳过 `*.dict.yaml` 与超大文件。
+     */
+    internal fun stripBomFromUserYaml(rimeDir: File): Int {
+        if (!rimeDir.isDirectory) return 0
+        var fixed = 0
+        rimeDir.listFiles()?.forEach { file ->
+            if (!file.isFile || !file.name.endsWith(".yaml")) return@forEach
+            if (file.name.endsWith(".dict.yaml") || file.length() > BOM_SCAN_MAX_BYTES) return@forEach
+            runCatching {
+                val bytes = file.readBytes()
+                if (bytes.size >= 3 &&
+                    bytes[0] == 0xEF.toByte() &&
+                    bytes[1] == 0xBB.toByte() &&
+                    bytes[2] == 0xBF.toByte()
+                ) {
+                    file.writeBytes(bytes.copyOfRange(3, bytes.size))
+                    fixed++
+                }
+            }.onFailure { FileLogger.w(TAG, "strip BOM failed: ${file.name}", it) }
+        }
+        return fixed
     }
 
     /**
