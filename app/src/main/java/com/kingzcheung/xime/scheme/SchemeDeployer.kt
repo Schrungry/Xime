@@ -48,7 +48,9 @@ internal object SchemeDeployer {
             File(rimeDir, "build").deleteRecursively()
             SettingsPreferences.setDeploymentHash(context, "")
         }
-        val deployed = RimeConfigHelper.ensureDeployment(context)
+        // force=false（用户主动点部署）时也要跑一次维护：部署 hash 只覆盖部分配置文件，
+        // 用户改动 hash 之外的文件时短路会让「部署」看起来没生效。
+        val deployed = RimeConfigHelper.ensureDeployment(context, alwaysMaintain = !force)
         val missing = RimeConfigHelper.missingCompiledSchemas(context)
         SettingsPreferences.setDeploymentDone(context, deployed && missing.isEmpty())
         if (!deployed) FileLogger.e(TAG, "deploy returned false")
