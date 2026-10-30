@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,7 +38,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -145,6 +148,7 @@ private fun LayoutDetailBody(
     val currentVersion = layout.versions.firstOrNull { it.version == selectedVersion }
         ?: layout.resolvedVersion()
     var previewUrl by remember { mutableStateOf<String?>(null) }
+    var confirmApply by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -212,10 +216,28 @@ private fun LayoutDetailBody(
             }
         }
 
+        if (layout.warning.isNotEmpty()) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                ) {
+                    Text(
+                        layout.warning,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { viewModel.applyLayout(item, selectedVersion) },
+                    onClick = { confirmApply = true },
                     enabled = item.schemeReady && uiState.installingId != layout.id,
                 ) {
                     Text(if (applied) tr(R.string.s_zhongxinyingyong) else tr(R.string.s_yingyong))
@@ -317,6 +339,40 @@ private fun LayoutDetailBody(
                 }
             }
         }
+    }
+
+    if (confirmApply) {
+        AlertDialog(
+            onDismissRequest = { confirmApply = false },
+            title = { Text(tr(R.string.s_yingyongbuju)) },
+            text = {
+                Column {
+                    Text(
+                        tr(
+                            R.string.s_jiangfugaidangqiande_xime_cust_d2f7d,
+                            layout.name.ifBlank { layout.id },
+                        ),
+                    )
+                    if (layout.warning.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            layout.warning,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmApply = false
+                    viewModel.applyLayout(item, selectedVersion)
+                }) { Text(tr(R.string.s_yingyong)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmApply = false }) { Text(tr(R.string.s_quxiao)) }
+            },
+        )
     }
 
     previewUrl?.let { url ->

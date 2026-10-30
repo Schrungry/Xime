@@ -2444,7 +2444,22 @@ private fun LayoutsMarketTab(
             onDismissRequest = { confirmApply = null },
             title = { Text(tr(R.string.s_yingyongbuju)) },
             text = {
-                Text(tr(R.string.s_jiangfugaidangqiande_xime_cust_d2f7d, target.layout.name.ifBlank { target.layout.id }))
+                Column {
+                    Text(
+                        tr(
+                            R.string.s_jiangfugaidangqiande_xime_cust_d2f7d,
+                            target.layout.name.ifBlank { target.layout.id },
+                        ),
+                    )
+                    if (target.layout.warning.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            target.layout.warning,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
