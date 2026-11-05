@@ -51,8 +51,8 @@ android {
         applicationId = "com.kingzcheung.xime"
         minSdk = 28
         targetSdk = 35
-        versionCode = 20261029
-        versionName = "3.4.3"
+        versionCode = 20261104
+        versionName = "3.5.0-alpha.2"
 
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -244,9 +244,9 @@ dependencies {
     implementation("com.google.zxing:core:3.5.4")
 
     // Ktor embedded server for wireless import
-    implementation("io.ktor:ktor-server-core:3.6.0")
-    implementation("io.ktor:ktor-server-cio:3.6.0")
-    implementation("io.ktor:ktor-io-jvm:3.6.0")
+    implementation("io.ktor:ktor-server-core:3.6.1")
+    implementation("io.ktor:ktor-server-cio:3.6.1")
+    implementation("io.ktor:ktor-io-jvm:3.6.1")
     implementation(libs.kotlinx.serialization.json)
 
     // Room 3.0 (SQLite)

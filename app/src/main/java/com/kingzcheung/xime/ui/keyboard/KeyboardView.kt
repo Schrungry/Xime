@@ -77,6 +77,7 @@ import com.kingzcheung.xime.settings.SettingsPreferences
 import com.kingzcheung.xime.ui.isTablet
 import com.kingzcheung.xime.ui.menubar.ClipboardView
 import com.kingzcheung.xime.ui.menubar.SchemaListView
+import com.kingzcheung.xime.ui.menubar.SchemaSwitchListView
 import com.kingzcheung.xime.ui.menubar.ToolbarCustomizeView
 import com.kingzcheung.xime.ui.theme.KeyboardThemes
 import com.kingzcheung.xime.ui.theme.keyboardBackground
@@ -251,6 +252,8 @@ fun KeyboardView(
         else longToColor(kbColors.candidateTextColor)
     val candidateSelectedTextColor = KeyboardThemes.getCandidateSelectedTextColorOverride(state.themeId, state.isDarkTheme)
         ?: KeyboardThemes.getCandidateSelectedTextColor(state.themeId, state.isDarkTheme)
+    val candidateSelectedBgColor =
+        KeyboardThemes.getCandidateSelectedBgColor(state.themeId, state.isDarkTheme)
     val dividerColor = if (state.isDarkTheme) androidx.compose.ui.graphics.Color(0xFF3C4043) else androidx.compose.ui.graphics.Color(0xFFDADCE0)
 
     val clipboardTab = (page as? KeyboardPage.Overlay)?.let {
@@ -462,7 +465,8 @@ fun KeyboardView(
                         is ToolbarButtonItem.Builtin -> when (item.button) {
                             ToolbarButton.EMOJI -> ({ viewModel.showOverlay(OverlayRoute.Emoji) })
                             ToolbarButton.CLIPBOARD -> ({ viewModel.showOverlay(OverlayRoute.Clipboard(0)) })
-                            ToolbarButton.SCHEMA -> ({ viewModel.showOverlay(OverlayRoute.SchemaList, listOf(OverlayRoute.Menu)) })
+                            ToolbarButton.SCHEMA -> ({ viewModel.showOverlay(OverlayRoute.SchemaList) })
+                            ToolbarButton.SWITCHES -> ({ viewModel.showOverlay(OverlayRoute.SchemaSwitches) })
                             ToolbarButton.QUICK_PHRASE -> ({ viewModel.showOverlay(OverlayRoute.Clipboard(1)) })
                             ToolbarButton.SYMBOL -> ({ viewModel.showOverlay(OverlayRoute.Symbol) })
                             ToolbarButton.SELECT_ALL -> ({ callbacks.onToolbarEditingAction?.invoke("select_all") })
@@ -499,6 +503,7 @@ fun KeyboardView(
                     dividerColor = dividerColor,
                     accentColor = accentColor,
                     selectedTextColor = candidateSelectedTextColor,
+                    selectedBackgroundColor = candidateSelectedBgColor,
                     isDarkTheme = state.isDarkTheme,
                     keyBgColor = keyBgColor
                 ),
@@ -580,11 +585,7 @@ fun KeyboardView(
                             handwritingClearSignal++
                         } else {
                             when (page) {
-                                is KeyboardPage.Overlay -> {
-                                    if ((page as KeyboardPage.Overlay).backStack.isEmpty())
-                                        viewModel.closeOverlay()
-                                    else viewModel.popOverlay()
-                                }
+                                is KeyboardPage.Overlay -> viewModel.closeOverlay()
                                 is KeyboardPage.Panel -> viewModel.exitPanel()
                                 is KeyboardPage.Main -> viewModel.setCandidatePageExpanded(false)
                             }
@@ -750,6 +751,7 @@ fun KeyboardView(
                         railPinyinOptions = railPinyinOptions,
                         railSelectedPinyinIndex = railSelectedPinyinIndex,
                         railAccentColor = accentColor,
+                        railSelectedBgColor = candidateSelectedBgColor,
                         rightRailEqualSplit = state.isFloatingMode,
                     ),
                     callbacks = CandidatePageCallbacks(
@@ -1409,7 +1411,6 @@ fun KeyboardView(
                             keyBgColor = keyBgColor,
                             keyTextColor = keyTextColor,
                             isFloatingMode = state.isFloatingMode,
-                            schemaSwitches = state.schemaSwitches,
                             canResizeKeyboard = !state.isHostConstrained,
                             canFloatKeyboard = !state.isHostConstrained,
                         ),
@@ -1422,11 +1423,20 @@ fun KeyboardView(
                             onReloadConfig = { onHapticFeedback?.invoke(); callbacks.onReloadConfig?.invoke(); viewModel.closeOverlay() },
                             onSettings = { onHapticFeedback?.invoke(); callbacks.onSettings?.invoke(); viewModel.closeOverlay() },
                             onSchemaList = { onHapticFeedback?.invoke(); viewModel.pushOverlay(OverlayRoute.SchemaList) },
+                            onSchemaSwitches = { onHapticFeedback?.invoke(); viewModel.pushOverlay(OverlayRoute.SchemaSwitches) },
                             onToggleDarkMode = { onHapticFeedback?.invoke(); callbacks.onToggleDarkMode?.invoke() },
                             onToolbarCustomize = { onHapticFeedback?.invoke(); viewModel.showOverlay(OverlayRoute.ToolbarCustomize) },
                             onFloatingModeToggle = { onHapticFeedback?.invoke(); callbacks.onFloatingModeChange?.invoke(!state.isFloatingMode); viewModel.closeOverlay() },
-                            onToggleSchemaSwitch = { sw -> onHapticFeedback?.invoke(); callbacks.onToggleSchemaSwitch?.invoke(sw); viewModel.closeOverlay() },
                         ),
+                        modifier = Modifier.fillMaxWidth().fillMaxHeight()
+                    )
+                    is OverlayRoute.SchemaSwitches -> SchemaSwitchListView(
+                        switches = state.schemaSwitches,
+                        backgroundColor = keyboardBgColor,
+                        keyTextColor = keyTextColor,
+                        keyBgColor = keyBgColor,
+                        onToggleSwitch = { sw -> onHapticFeedback?.invoke(); callbacks.onToggleSchemaSwitch?.invoke(sw) },
+                        onBack = { viewModel.closeOverlay() },
                         modifier = Modifier.fillMaxWidth().fillMaxHeight()
                     )
                     is OverlayRoute.SchemaList -> SchemaListView(
@@ -1440,7 +1450,7 @@ fun KeyboardView(
                             callbacks.onSwitchSchema?.invoke(schemaId)
                             viewModel.closeOverlay()
                         },
-                        onBack = { viewModel.popOverlay() },
+                        onBack = { viewModel.closeOverlay() },
                         modifier = Modifier.fillMaxWidth().fillMaxHeight()
                     )
                     is OverlayRoute.Clipboard -> ClipboardView(
@@ -1453,6 +1463,10 @@ fun KeyboardView(
                         viewModel = viewModel,
                         onSelectItem = { text ->
                             callbacks.onClipboardSelect?.invoke(text)
+                            viewModel.closeOverlay()
+                        },
+                        onQuickSendSelect = { text ->
+                            callbacks.onQuickSendSelect?.invoke(text)
                             viewModel.closeOverlay()
                         },
                         onSelectImage = { item ->
@@ -1557,7 +1571,7 @@ fun KeyboardView(
                         text = p.route.text,
                         backgroundColor = keyboardBgColor,
                         viewModel = viewModel,
-                        onBack = { viewModel.popOverlay() },
+                        onBack = { viewModel.closeOverlay() },
                         onNavigateToQuickSend = { viewModel.pushOverlay(OverlayRoute.Clipboard(1)) },
                         onSelectChar = { char -> callbacks.onCommitText?.invoke(char) },
                         onDeleteText = { count -> callbacks.onDeleteText?.invoke(count) },
