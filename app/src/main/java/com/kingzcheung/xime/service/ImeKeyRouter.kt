@@ -3,6 +3,7 @@ package com.kingzcheung.xime.service
 import android.util.Log
 import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import com.kingzcheung.xime.association.AssociationManager
 import com.kingzcheung.xime.service.CandidateAction
 import com.kingzcheung.xime.correction.CorrectionPriors
@@ -27,6 +28,31 @@ internal fun classifyHardwareEnterResult(
     rimeConsumed -> HardwareKeyHandlingResult.RIME_CONSUMED
     hasCompositionAfterRouting -> HardwareKeyHandlingResult.IME_CONSUMED
     else -> HardwareKeyHandlingResult.FORWARDED_TO_EDITOR
+}
+
+internal fun dispatchEditorEnterFallback(
+    connection: InputConnection?,
+    imeOptions: Int,
+    hardwareEvent: KeyEvent? = null,
+    sendEnter: () -> Unit,
+) {
+    if (hardwareEvent?.isShiftPressed == true) {
+        // 实体 key-up 由服务层消费，这里成对回放并保留 Shift，交给编辑器处理换行。
+        connection?.sendKeyEvent(KeyEvent(hardwareEvent))
+        connection?.sendKeyEvent(KeyEvent.changeAction(hardwareEvent, KeyEvent.ACTION_UP))
+        return
+    }
+    val action = imeOptions and EditorInfo.IME_MASK_ACTION
+    val noEnterAction = imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
+    when {
+        noEnterAction -> sendEnter()
+        action == EditorInfo.IME_ACTION_GO ||
+        action == EditorInfo.IME_ACTION_SEARCH ||
+        action == EditorInfo.IME_ACTION_SEND ||
+        action == EditorInfo.IME_ACTION_NEXT ||
+        action == EditorInfo.IME_ACTION_DONE -> connection?.performEditorAction(action)
+        else -> sendEnter()
+    }
 }
 
 /**
@@ -122,6 +148,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
             onResult(HardwareKeyHandlingResult.IME_CONSUMED)
             return
         }
+        val fallbackEvent = KeyEvent(event)
         if (state.isVoiceMode && state.voiceSticky) {
             service.sealVoiceSessionForSend()
         }
@@ -153,7 +180,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                     commitComposingInput(current, service.uiState.value.currentSchemaId)
                     resetEnterLikeCandidates(service.uiState.value.currentSchemaId)
                 } else {
-                    dispatchEditorEnter()
+                    dispatchEditorEnter(fallbackEvent)
                 }
                 onResult(handlingResult)
             }
@@ -873,20 +900,14 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
         withContext(Dispatchers.Main) { service.endComposingInputBox() }
     }
 
-    private suspend fun dispatchEditorEnter() {
+    private suspend fun dispatchEditorEnter(hardwareEvent: KeyEvent? = null) {
         withContext(Dispatchers.Main) {
-            val imeOptions = service.currentInputEditorInfo?.imeOptions ?: 0
-            val action = imeOptions and EditorInfo.IME_MASK_ACTION
-            val noEnterAction = imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
-            when {
-                noEnterAction -> service.sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
-                action == EditorInfo.IME_ACTION_GO ||
-                action == EditorInfo.IME_ACTION_SEARCH ||
-                action == EditorInfo.IME_ACTION_SEND ||
-                action == EditorInfo.IME_ACTION_NEXT ||
-                action == EditorInfo.IME_ACTION_DONE ->
-                    service.currentInputConnection?.performEditorAction(action)
-                else -> service.sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
+            dispatchEditorEnterFallback(
+                connection = service.currentInputConnection,
+                imeOptions = service.currentInputEditorInfo?.imeOptions ?: 0,
+                hardwareEvent = hardwareEvent,
+            ) {
+                service.sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
             }
         }
     }
