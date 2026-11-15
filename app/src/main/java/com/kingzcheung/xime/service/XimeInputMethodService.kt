@@ -2180,6 +2180,10 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         ) {
             physicalKeyboardActive = true
             applyCompactMode()
+            // 手动收起会隐藏整个 IME 窗口；先切为紧凑模式，再恢复候选栏。
+            if (!isInputViewShown) {
+                requestShowSelf(0)
+            }
         }
         // 物理 Shift 单击切中英文的组合检测：Shift 按下重置标记，期间任何其他键按下即视为组合
         // （如 Shift+字母大写），抬起时不再触发切换。
